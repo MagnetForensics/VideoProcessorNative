@@ -132,6 +132,14 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
     </Link>
+    <PreBuildEvent>
+      <Command>SET rootDir=$(SolutionDir)packages
+SET sourceDir=$(SolutionDir)$(MSBuildProjectName)\packages
+if not exist %rootDir% mkdir "%rootDir%
+if not exist %sourceDir% mklink /j %sourceDir% %rootDir%
+exit 0</Command>
+      <Message>Ensure packages directory can be located when used as a git submodule.</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
