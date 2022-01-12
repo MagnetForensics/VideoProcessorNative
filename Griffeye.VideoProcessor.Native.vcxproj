@@ -22,7 +22,7 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{dd8fdda1-5fab-4f1d-a04c-1692e6b3a984}</ProjectGuid>
-    <RootNamespace>GriffeyeVideoProcessorNative</RootNamespace>
+    <RootNamespace>Griffeye.VideoProcessor.Native</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -163,13 +163,12 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <!--<Import Project="..\Griffeye.VideoProcessor\packages\FFmpeg.Nightly.LGPL.20200831.1.0\build\native\FFmpeg.Nightly.LGPL.targets" Condition="Exists('..\Griffeye.VideoProcessor\packages\FFmpeg.Nightly.LGPL.20200831.1.0\build\native\FFmpeg.Nightly.LGPL.targets')" />-->
-    <Import Project="..\packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets" Condition="Exists('..\packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets')" />
+    <Import Project="packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets" Condition="Exists('packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets'))" />
+    <Error Condition="!Exists('packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\ffmpeg-lgpl.4.4.1.6\build\native\ffmpeg-lgpl.targets'))" />
   </Target>
 </Project>
