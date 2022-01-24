@@ -773,6 +773,9 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 {
 	AVFrame* av_frame = NULL;
 
+	if (video->num_queue <= 0)
+		return VX_ERR_EOF;
+
 	// Get the first item from the queue, but do not dequeue
 	av_frame = vx_get_first_queue_item(video);
 	if (!av_frame)
