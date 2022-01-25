@@ -80,25 +80,25 @@ static vx_log_level av_to_vx_log_level(const int level)
 {
 	// See: lavu_log_constants
 	switch (level) {
-		case AV_LOG_QUIET:
-			return VX_LOG_NONE;
+	case AV_LOG_QUIET:
+		return VX_LOG_NONE;
 
-		case AV_LOG_PANIC:
-		case AV_LOG_FATAL:
-			return VX_LOG_FATAL;
+	case AV_LOG_PANIC:
+	case AV_LOG_FATAL:
+		return VX_LOG_FATAL;
 
-		case AV_LOG_ERROR:
-			return VX_LOG_ERROR;
+	case AV_LOG_ERROR:
+		return VX_LOG_ERROR;
 
-		case AV_LOG_INFO:
-		case AV_LOG_VERBOSE:
-			return VX_LOG_INFO;
+	case AV_LOG_INFO:
+	case AV_LOG_VERBOSE:
+		return VX_LOG_INFO;
 
-		case AV_LOG_DEBUG:
-			return VX_LOG_DEBUG;
+	case AV_LOG_DEBUG:
+		return VX_LOG_DEBUG;
 
-		default:
-			return VX_LOG_NONE;
+	default:
+		return VX_LOG_NONE;
 	}
 }
 
@@ -500,6 +500,7 @@ static vx_error vx_decode_frame(vx_video* me, AVFrame* out_frame_buffer[10], int
 	AVFrame* frame = NULL;
 	int frame_count = 0;
 	*out_frames_count = 0;
+	*out_stream_idx = -1;
 
 	packet = av_packet_alloc();
 	if (!packet) {
@@ -510,6 +511,13 @@ static vx_error vx_decode_frame(vx_video* me, AVFrame* out_frame_buffer[10], int
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
 	if (!vx_read_frame(me->fmt_ctx, packet, me->video_stream)) {
 		ret = VX_ERR_EOF;
+		goto cleanup;
+	}
+
+	// Only attempt to deocde packets from the two streams that have been selected
+	if (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
+	{
+		ret = VX_ERR_VIDEO_STREAM;
 		goto cleanup;
 	}
 
