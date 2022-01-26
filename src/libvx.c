@@ -80,25 +80,25 @@ static vx_log_level av_to_vx_log_level(const int level)
 {
 	// See: lavu_log_constants
 	switch (level) {
-	case AV_LOG_QUIET:
-		return VX_LOG_NONE;
+		case AV_LOG_QUIET:
+			return VX_LOG_NONE;
 
-	case AV_LOG_PANIC:
-	case AV_LOG_FATAL:
-		return VX_LOG_FATAL;
+		case AV_LOG_PANIC:
+		case AV_LOG_FATAL:
+			return VX_LOG_FATAL;
 
-	case AV_LOG_ERROR:
-		return VX_LOG_ERROR;
+		case AV_LOG_ERROR:
+			return VX_LOG_ERROR;
 
-	case AV_LOG_INFO:
-	case AV_LOG_VERBOSE:
-		return VX_LOG_INFO;
+		case AV_LOG_INFO:
+		case AV_LOG_VERBOSE:
+			return VX_LOG_INFO;
 
-	case AV_LOG_DEBUG:
-		return VX_LOG_DEBUG;
+		case AV_LOG_DEBUG:
+			return VX_LOG_DEBUG;
 
-	default:
-		return VX_LOG_NONE;
+		default:
+			return VX_LOG_NONE;
 	}
 }
 
@@ -184,16 +184,16 @@ static bool use_hw(const vx_video video, const AVCodec* codec)
 static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 {
 	enum AVHWDeviceType type_priority[] = {
-			AV_HWDEVICE_TYPE_VDPAU,
-			AV_HWDEVICE_TYPE_D3D11VA,
-			AV_HWDEVICE_TYPE_CUDA,
-			AV_HWDEVICE_TYPE_VAAPI,
-			AV_HWDEVICE_TYPE_DXVA2,
-			AV_HWDEVICE_TYPE_QSV,
-			AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
-			AV_HWDEVICE_TYPE_DRM,
-			AV_HWDEVICE_TYPE_OPENCL,
-			AV_HWDEVICE_TYPE_MEDIACODEC,
+		AV_HWDEVICE_TYPE_VDPAU,
+		AV_HWDEVICE_TYPE_D3D11VA,
+		AV_HWDEVICE_TYPE_CUDA,
+		AV_HWDEVICE_TYPE_VAAPI,
+		AV_HWDEVICE_TYPE_DXVA2,
+		AV_HWDEVICE_TYPE_QSV,
+		AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+		AV_HWDEVICE_TYPE_DRM,
+		AV_HWDEVICE_TYPE_OPENCL,
+		AV_HWDEVICE_TYPE_MEDIACODEC,
 	};
 
 	for (int j = 0; j < sizeof(type_priority) / sizeof(enum AVHWDeviceType); j++)
@@ -493,7 +493,7 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 		: video->last_ts + ts_estimated;
 }
 
-static vx_error vx_decode_frame(vx_video* me, AVFrame* out_frame_buffer[10], int* out_frames_count, int* out_stream_idx)
+static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVPacket* packet = NULL;
@@ -657,7 +657,8 @@ vx_error vx_frame_process_audio(vx_video* me, AVFrame* frame)
 vx_error vx_queue_frames(vx_video* me)
 {
 	vx_error ret = VX_ERR_SUCCESS;
-	AVFrame* frame_buffer[10] = { NULL };
+	static AVFrame* frame_buffer[50] = { NULL };
+	int frame_idx = 0;
 	int frame_count = 0;
 	me->frame_deferred = false;
 
@@ -683,8 +684,11 @@ vx_error vx_queue_frames(vx_video* me)
 				// Audio frame (and audio is enabled)
 				if (me->audio_cb) {
 					vx_error result = vx_frame_process_audio(me, frame);
-					if (result != VX_ERR_SUCCESS) {
+
+					// The rest of the buffer must be processed, even if max samples has been reached
+					if (result != VX_ERR_SUCCESS && result != VX_ERR_FRAME_DEFERRED) {
 						ret = result;
+						frame_idx = i;
 						goto cleanup;
 					}
 				}
@@ -696,6 +700,7 @@ vx_error vx_queue_frames(vx_video* me)
 			}
 			else {
 				ret = VX_ERR_UNKNOWN;
+				frame_idx = i;
 				goto cleanup;
 			}
 		}
@@ -704,7 +709,7 @@ vx_error vx_queue_frames(vx_video* me)
 	return ret;
 
 cleanup:
-	for (int i = 0; i < frame_count; i++) {
+	for (int i = frame_idx; i < frame_count; i++) {
 		AVFrame* frame = frame_buffer[i];
 		if (frame) {
 			av_frame_unref(frame);
