@@ -80,25 +80,25 @@ static vx_log_level av_to_vx_log_level(const int level)
 {
 	// See: lavu_log_constants
 	switch (level) {
-		case AV_LOG_QUIET:
-			return VX_LOG_NONE;
+	case AV_LOG_QUIET:
+		return VX_LOG_NONE;
 
-		case AV_LOG_PANIC:
-		case AV_LOG_FATAL:
-			return VX_LOG_FATAL;
+	case AV_LOG_PANIC:
+	case AV_LOG_FATAL:
+		return VX_LOG_FATAL;
 
-		case AV_LOG_ERROR:
-			return VX_LOG_ERROR;
+	case AV_LOG_ERROR:
+		return VX_LOG_ERROR;
 
-		case AV_LOG_INFO:
-		case AV_LOG_VERBOSE:
-			return VX_LOG_INFO;
+	case AV_LOG_INFO:
+	case AV_LOG_VERBOSE:
+		return VX_LOG_INFO;
 
-		case AV_LOG_DEBUG:
-			return VX_LOG_DEBUG;
+	case AV_LOG_DEBUG:
+		return VX_LOG_DEBUG;
 
-		default:
-			return VX_LOG_NONE;
+	default:
+		return VX_LOG_NONE;
 	}
 }
 
@@ -686,10 +686,15 @@ vx_error vx_queue_frames(vx_video* me)
 					vx_error result = vx_frame_process_audio(me, frame);
 
 					// The rest of the buffer must be processed, even if max samples has been reached
-					if (result != VX_ERR_SUCCESS && result != VX_ERR_FRAME_DEFERRED) {
-						ret = result;
-						frame_idx = i;
-						goto cleanup;
+					if (result != VX_ERR_SUCCESS) {
+						if (result == VX_ERR_FRAME_DEFERRED) {
+							ret = result;
+						}
+						else {
+							ret = result;
+							frame_idx = i;
+							goto cleanup;
+						}
 					}
 				}
 
