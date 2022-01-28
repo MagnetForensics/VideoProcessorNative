@@ -840,8 +840,20 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 {
 	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
 
-	if (rate.num == 0 || rate.den == 0)
-		return VX_ERR_FRAME_RATE;
+	if (rate.num == 0 || rate.den == 0) {
+		// Attempt to fall back to determining frame rate manually
+		int frame_count = 0;
+		float duration = 0;
+		vx_count_frames(video, &frame_count);
+		vx_get_duration(video, &duration);
+
+		if (frame_count <= 0 || duration <= 0) {
+			return VX_ERR_FRAME_RATE;
+		}
+
+		*out_fps = (float)frame_count / duration;
+		return VX_ERR_SUCCESS;
+	}
 
 	*out_fps = (float)av_q2d(rate);
 	return VX_ERR_SUCCESS;
