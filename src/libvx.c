@@ -6,6 +6,7 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 #include <libavformat/avformat.h>
@@ -29,7 +30,8 @@ static vx_log_callback log_cb = NULL;
 
 struct vx_frame
 {
-	int width, height;
+	int width;
+	int height;
 	vx_pix_fmt pix_fmt;
 
 	void* buffer;
@@ -585,7 +587,6 @@ cleanup:
 static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
-
 	int av_pixfmt = vx_to_av_pix_fmt(vxframe->pix_fmt);
 
 	struct SwsContext* sws_ctx = sws_getContext(
@@ -880,13 +881,12 @@ vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
 	me->pix_fmt = pix_fmt;
 
 	int av_pixfmt = vx_to_av_pix_fmt(pix_fmt);
-	int size = avpicture_get_size(av_pixfmt, width, height);
+	int size = av_image_get_buffer_size(av_pixfmt, width, height, 1);
 
 	if (size <= 0)
 		goto error;
 
-	me->buffer = av_malloc(size);
-	memset(me->buffer, 0, size);
+	me->buffer = av_mallocz(size);
 
 	if (!me->buffer)
 		goto error;
@@ -902,7 +902,7 @@ error:
 
 void vx_frame_destroy(vx_frame* me)
 {
-	av_free(me->buffer);
+	av_freep(me->buffer);
 	free(me);
 }
 
@@ -914,7 +914,7 @@ void* vx_frame_get_buffer(vx_frame* frame)
 int vx_frame_get_buffer_size(const vx_frame* frame)
 {
 	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
-	return avpicture_get_size(av_pixfmt, frame->width, frame->height);
+	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1);
 }
 
 vx_error vx_set_audio_max_samples_per_frame(vx_video* me, int max_samples)
