@@ -38,6 +38,7 @@ struct vx_frame
 };
 
 #define FRAME_QUEUE_SIZE 16
+#define FRAME_BUFFER_PADDING 4096
 #define LOG_TRACE_BUFSIZE 4096
 
 struct vx_video
@@ -881,7 +882,8 @@ vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
 	me->pix_fmt = pix_fmt;
 
 	int av_pixfmt = vx_to_av_pix_fmt(pix_fmt);
-	int size = av_image_get_buffer_size(av_pixfmt, width, height, 1);
+	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
+	int size = av_image_get_buffer_size(av_pixfmt, width, height, 1) + FRAME_BUFFER_PADDING;
 
 	if (size <= 0)
 		goto error;
@@ -902,7 +904,7 @@ error:
 
 void vx_frame_destroy(vx_frame* me)
 {
-	av_freep(me->buffer);
+	av_free(me->buffer);
 	free(me);
 }
 
@@ -914,7 +916,7 @@ void* vx_frame_get_buffer(vx_frame* frame)
 int vx_frame_get_buffer_size(const vx_frame* frame)
 {
 	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
-	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1);
+	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
 vx_error vx_set_audio_max_samples_per_frame(vx_video* me, int max_samples)
