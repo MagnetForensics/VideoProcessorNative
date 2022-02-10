@@ -520,7 +520,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	// Only attempt to deocde packets from the two streams that have been selected
 	if (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
 	{
-		ret = VX_ERR_VIDEO_STREAM;
+		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
 
