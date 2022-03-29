@@ -49,7 +49,7 @@ typedef enum {
 	VX_ERR_DECODE_AUDIO    = 13,
 	VX_ERR_NO_AUDIO        = 14,
 	VX_ERR_RESAMPLE_AUDIO  = 15,
-	VX_ERR_FILE_NOT_FOUND  = 15,
+	VX_ERR_FILE_NOT_FOUND  = 16,
 } vx_error;
 
 typedef enum {
