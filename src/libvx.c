@@ -299,9 +299,15 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 
 	vx_error error = VX_ERR_UNKNOWN;
 
-	// open stream
-	if (avformat_open_input(&me->fmt_ctx, filename, NULL, NULL) != 0) {
-		error = VX_ERR_OPEN_FILE;
+	// Open stream
+	int open_result = avformat_open_input(&me->fmt_ctx, filename, NULL, NULL);
+	if (open_result != 0) {
+		if (open_result == AVERROR(ENOENT)) {
+			error = VX_ERR_FILE_NOT_FOUND;
+		}
+		else {
+			error = VX_ERR_OPEN_FILE;
+		}
 		goto cleanup;
 	}
 
@@ -311,7 +317,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		goto cleanup;
 	}
 
-	// find video and audio streams and open respective codecs
+	// Find video and audio streams and open respective codecs
 	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_VIDEO, &me->video_stream, &me->video_codec_ctx, &error)) {
 		goto cleanup;
 	}
