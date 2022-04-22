@@ -12,7 +12,6 @@
 #include "libavutil/display.h"
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
-#include <libavutil/opt.h>
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -254,7 +253,6 @@ static int vx_initialize_filters(vx_video* video, const char* filters_descr)
 	AVFilterInOut* inputs = avfilter_inout_alloc();
 	AVFilterContext* last_filter;
 	AVRational time_base = video_stream->time_base;
-	enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_GRAY8, AV_PIX_FMT_NONE };
 	int pad_index = 0;
 	char args[512];
 	int ret = 0;
@@ -282,12 +280,6 @@ static int vx_initialize_filters(vx_video* video, const char* filters_descr)
 	ret = avfilter_graph_create_filter(&filter_sink, buffersink, "out", NULL, NULL, video->filter_pipeline);
 	if (ret < 0) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
-		goto end;
-	}
-
-	ret = av_opt_set_int_list(filter_sink, "pix_fmts", pix_fmts, AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
-	if (ret < 0) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
 		goto end;
 	}
 
