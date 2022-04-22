@@ -167,49 +167,70 @@ static AVFrame* vx_get_first_queue_item(const vx_video* video)
 	return video->frame_queue[video->num_queue - 1];
 }
 
-static int vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* args)
+static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* args)
 {
+	vx_error result = VX_ERR_UNKNOWN;
 	AVFilterGraph* graph = (*last_filter)->graph;
 	AVFilterContext* filter_ctx;
 	int ret;
 
 	ret = avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_name, args, NULL, graph);
 	if (ret < 0)
-		return ret;
+		return result;
 
 	ret = avfilter_link(*last_filter, *pad_index, filter_ctx, 0);
 	if (ret < 0)
-		return ret;
+		return result;
 
 	*last_filter = filter_ctx;
 	*pad_index = 0;
 
-	return 0;
+	return VX_ERR_SUCCESS;
 }
 
-static int vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, int* pad_index)
+static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
-	int ret = 0;
+	vx_error ret = VX_ERR_UNKNOWN;
+
 	uint8_t* displaymatrix = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, NULL);
 
 	if (displaymatrix) {
 		double theta = av_display_rotation_get((int32_t*)displaymatrix);
 
 		if (theta < -135 || theta > 135) {
-			ret = vx_insert_filter(last_filter, pad_index, "vflip", NULL);
-			if (ret < 0)
-				return ret;
-			ret = vx_insert_filter(last_filter, pad_index, "hflip", NULL);
+			*out_transform = "vflip, hflip";
+			*out_transform_args = NULL;
 		}
 		else if (theta < -45) {
-			ret = vx_insert_filter(last_filter, pad_index, "transpose", "dir=clock");
+			*out_transform = "transpose";
+			*out_transform_args = "dir=clock";
 		}
 		else if (theta > 45) {
-			ret = vx_insert_filter(last_filter, pad_index, "transpose", "dir=cclock");
+			*out_transform = "transpose";
+			*out_transform_args = "dir=cclock";
 		}
+
+		ret = VX_ERR_SUCCESS;
+	}
+	else {
+		ret = VX_ERR_STREAM_INFO;
 	}
 
 	return ret;
+}
+
+static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, int* pad_index)
+{
+	int result = VX_ERR_UNKNOWN;
+	char* transform = NULL;
+	char* transform_args = NULL;
+
+	result = vx_get_rotation_transform(stream, &transform, &transform_args);
+	if (result != VX_ERR_SUCCESS) {
+		return result;
+	}
+
+	return vx_insert_filter(last_filter, pad_index, transform, transform_args);
 }
 
 static int vx_initialize_filters(vx_video* video, const char* filters_descr)
@@ -565,14 +586,24 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	return VX_ERR_SUCCESS;
 }
 
+static bool vx_video_is_rotated(const vx_video* video)
+{
+	char* transform = NULL;
+	char* transform_args = NULL;
+
+	return vx_get_rotation_transform(video->fmt_ctx->streams[video->video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
+		&& transform == "transpose"
+		&& (transform_args == "dir=clock" || transform_args == "dir=cclock");
+}
+
 int vx_get_width(const vx_video* me)
 {
-	return me->video_codec_ctx->width;
+	return vx_video_is_rotated(me) ? me->video_codec_ctx->height : me->video_codec_ctx->width;
 }
 
 int vx_get_height(const vx_video* me)
 {
-	return me->video_codec_ctx->height;
+	return vx_video_is_rotated(me) ? me->video_codec_ctx->width : me->video_codec_ctx->height;
 }
 
 long long vx_get_file_position(const vx_video* video)
