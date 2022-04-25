@@ -466,8 +466,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		dprintf("no audio stream\n");
 	}
 
-	if (vx_initialize_filters(me) < 0) {
-		error = VX_ERR_ALLOCATE;
+	if ((error = vx_initialize_filters(me)) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 
