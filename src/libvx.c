@@ -164,36 +164,6 @@ static AVFrame* vx_get_first_queue_item(const vx_video* video)
 	return video->frame_queue[video->num_queue - 1];
 }
 
-static AVFilterContext* vx_get_filter(const AVFilterGraph* filter_graph, const char* name)
-{
-	for (int i = 0; i < filter_graph->nb_filters; i++) {
-		AVFilterContext* filter = filter_graph->filters[i];
-		if (*filter->name == *name) {
-			return filter;
-		}
-	}
-
-	return NULL;
-}
-
-static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* args)
-{
-	vx_error result = VX_ERR_INIT_FILTER;
-	AVFilterGraph* graph = (*last_filter)->graph;
-	AVFilterContext* filter_ctx;
-
-	if (avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_name, args, NULL, graph) < 0)
-		return result;
-
-	if (avfilter_link(*last_filter, *pad_index, filter_ctx, 0) < 0)
-		return result;
-
-	*last_filter = filter_ctx;
-	*pad_index = 0;
-
-	return VX_ERR_SUCCESS;
-}
-
 static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
 	vx_error result = VX_ERR_UNKNOWN;
@@ -225,7 +195,40 @@ static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_tra
 	return result;
 }
 
-static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, int* pad_index)
+static AVFilterContext* vx_get_filter(const AVFilterGraph* filter_graph, const char* name)
+{
+	for (int i = 0; i < filter_graph->nb_filters; i++) {
+		AVFilterContext* filter = filter_graph->filters[i];
+		if (*filter->name == *name) {
+			return filter;
+		}
+	}
+
+	return NULL;
+}
+
+static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* filter_label, const char* args)
+{
+	vx_error result = VX_ERR_INIT_FILTER;
+	AVFilterGraph* graph = (*last_filter)->graph;
+	AVFilterContext* filter_ctx;
+	if (!filter_label) {
+		filter_label = filter_name;
+	}
+
+	if (avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_label, args, NULL, graph) < 0)
+		return result;
+
+	if (avfilter_link(*last_filter, *pad_index, filter_ctx, 0) < 0)
+		return result;
+
+	*last_filter = filter_ctx;
+	*pad_index = 0;
+
+	return VX_ERR_SUCCESS;
+}
+
+static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, const int* pad_index)
 {
 	int result = VX_ERR_UNKNOWN;
 	char* transform = NULL;
@@ -236,17 +239,14 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 		return result;
 	}
 
-	return vx_insert_filter(last_filter, pad_index, transform, transform_args);
+	return vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args);
 }
 
 static vx_error vx_initialize_filters(vx_video* video)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
-	const AVFilter* buffersrc = avfilter_get_by_name("buffer");
-	const AVFilter* buffersink = avfilter_get_by_name("buffersink");
 	AVFilterContext* filter_source;
-	AVFilterContext* filter_sink;
 	AVFilterContext* last_filter;
 	int pad_index = 0;
 	char args[512];
@@ -264,14 +264,9 @@ static vx_error vx_initialize_filters(vx_video* video)
 		video_stream->time_base.num, video_stream->time_base.den,
 		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
 
-	if (avfilter_graph_create_filter(&filter_source, buffersrc, "in", args, NULL, video->filter_pipeline) < 0) {
+	// Create the filter pipeline source
+	if (avfilter_graph_create_filter(&filter_source, avfilter_get_by_name("buffer"), "in", args, NULL, video->filter_pipeline) < 0) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
-		goto cleanup;
-	}
-
-	/* buffer video sink: to terminate the filter chain. */
-	if (avfilter_graph_create_filter(&filter_sink, buffersink, "out", NULL, NULL, video->filter_pipeline) < 0) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
 		goto cleanup;
 	}
 
@@ -279,7 +274,7 @@ static vx_error vx_initialize_filters(vx_video* video)
 	last_filter = filter_source;
 	if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
 		goto cleanup;
-	if (avfilter_link(last_filter, pad_index, filter_sink, pad_index) < 0)
+	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
 	// Finally, construct the filter graph using all the linked nodes
