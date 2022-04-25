@@ -140,6 +140,11 @@ static enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
 	return formats[fmt];
 }
 
+static bool vx_is_packet_error(int result)
+{
+	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
+}
+
 static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
 {
 	const AVFrame* frame_a = *(AVFrame**)a;
@@ -689,7 +694,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		: me->audio_codec_ctx;
 
 	int result = avcodec_send_packet(codec_ctx, packet);
-	if (result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF) {
+	if (vx_is_packet_error(result)) {
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
 	}
@@ -742,6 +747,43 @@ cleanup:
 	av_packet_free(&packet);
 
 	return ret;
+}
+
+static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame* av_frame)
+{
+	vx_error result = VX_ERR_UNKNOWN;
+	int ret = 0;
+
+	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
+		const AVFilterContext* filter_source = vx_get_filter(video->filter_pipeline, "in");
+		const AVFilterContext* filter_sink = vx_get_filter(video->filter_pipeline, "out");
+
+		if (!(filter_source && filter_sink)) {
+			goto cleanup;
+		}
+
+		if (av_buffersrc_add_frame_flags(filter_source, av_frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+			av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
+			goto cleanup;
+		}
+
+		while (ret == 0) {
+			ret = av_buffersink_get_frame(filter_sink, av_frame);
+
+			if (vx_is_packet_error(ret)) {
+				av_log(NULL, AV_LOG_ERROR, "Error retrieving frames from the filtergraph\n");
+				goto cleanup;
+			}
+		}
+
+		frame->width = av_frame->width;
+		frame->height = av_frame->height;
+	}
+
+	result = VX_ERR_SUCCESS;
+
+cleanup:
+	return result;
 }
 
 static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
@@ -979,32 +1021,14 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 
 	// Run the frame through the filter pipeline, if any
-	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
-		const AVFilterContext* filter_source = vx_get_filter(video->filter_pipeline, "in");
-		const AVFilterContext* filter_sink = vx_get_filter(video->filter_pipeline, "out");
-
-		if (filter_source && filter_sink) {
-			int ret = 0;
-
-			if (av_buffersrc_add_frame_flags(filter_source, av_frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-				av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
-			}
-
-			while (1) {
-				ret = av_buffersink_get_frame(filter_sink, av_frame);
-				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-					break;
-				if (ret < 0)
-					goto cleanup;
-			}
-
-			frame->width = av_frame->width;
-			frame->height = av_frame->height;
-		}
+	if (vx_filter_frame(video, frame, av_frame) != VX_ERR_SUCCESS) {
+		goto cleanup;
 	}
 
 	// Fill the buffer
-	vx_scale_frame(av_frame, frame);
+	if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
+		goto cleanup;
+	}
 
 	if (hw_decoded) {
 		av_frame_unref(av_frame);
