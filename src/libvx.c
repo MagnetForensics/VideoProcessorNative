@@ -247,7 +247,7 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	return vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args);
 }
 
-static vx_error vx_initialize_filters(vx_video* video)
+static vx_error vx_init_filter_pipeline(vx_video* video)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
@@ -466,7 +466,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		dprintf("no audio stream\n");
 	}
 
-	if ((error = vx_initialize_filters(me)) != VX_ERR_SUCCESS) {
+	if ((error = vx_init_filter_pipeline(me)) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 
