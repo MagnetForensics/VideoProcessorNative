@@ -239,7 +239,7 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	return vx_insert_filter(last_filter, pad_index, transform, transform_args);
 }
 
-static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr)
+static vx_error vx_initialize_filters(vx_video* video)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
@@ -247,16 +247,13 @@ static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr
 	const AVFilter* buffersink = avfilter_get_by_name("buffersink");
 	AVFilterContext* filter_source;
 	AVFilterContext* filter_sink;
-	AVFilterInOut* outputs = avfilter_inout_alloc();
-	AVFilterInOut* inputs = avfilter_inout_alloc();
 	AVFilterContext* last_filter;
-	AVRational time_base = video_stream->time_base;
 	int pad_index = 0;
 	char args[512];
 
 	video->filter_pipeline = avfilter_graph_alloc();
 
-	if (!outputs || !inputs || !video->filter_pipeline) {
+	if (!video->filter_pipeline) {
 		result = VX_ERR_ALLOCATE;
 		goto cleanup;
 	}
@@ -264,7 +261,7 @@ static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
 		video->video_codec_ctx->width, video->video_codec_ctx->height, video->video_codec_ctx->pix_fmt,
-		time_base.num, time_base.den,
+		video_stream->time_base.num, video_stream->time_base.den,
 		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
 
 	if (avfilter_graph_create_filter(&filter_source, buffersrc, "in", args, NULL, video->filter_pipeline) < 0) {
@@ -278,29 +275,12 @@ static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr
 		goto cleanup;
 	}
 
-	// Use the provided filters, if any
-	if (filters_descr && strlen(filters_descr) > 0) {
-		outputs->name = av_strdup("in");
-		outputs->filter_ctx = filter_source;
-		outputs->pad_idx = pad_index;
-		outputs->next = NULL;
-
-		inputs->name = av_strdup("out");
-		inputs->filter_ctx = filter_sink;
-		inputs->pad_idx = pad_index;
-		inputs->next = NULL;
-
-		if (avfilter_graph_parse_ptr(video->filter_pipeline, filters_descr, &inputs, &outputs, NULL) < 0) {
-			goto cleanup;
-		}
-	}
-	else {
-		last_filter = filter_source;
-		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
-			goto cleanup;
-		if (avfilter_link(last_filter, pad_index, filter_sink, pad_index) < 0)
-			goto cleanup;
-	}
+	// Create and link up the filter nodes
+	last_filter = filter_source;
+	if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+		goto cleanup;
+	if (avfilter_link(last_filter, pad_index, filter_sink, pad_index) < 0)
+		goto cleanup;
 
 	// Finally, construct the filter graph using all the linked nodes
 	if (avfilter_graph_config(video->filter_pipeline, NULL) < 0) {
@@ -308,9 +288,6 @@ static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr
 	}
 
 cleanup:
-	avfilter_inout_free(&inputs);
-	avfilter_inout_free(&outputs);
-
 	return result;
 }
 
@@ -489,7 +466,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		dprintf("no audio stream\n");
 	}
 
-	if (vx_initialize_filters(me, NULL) < 0) {
+	if (vx_initialize_filters(me) < 0) {
 		error = VX_ERR_ALLOCATE;
 		goto cleanup;
 	}
