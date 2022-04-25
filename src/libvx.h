@@ -50,6 +50,7 @@ typedef enum {
 	VX_ERR_NO_AUDIO        = 14,
 	VX_ERR_RESAMPLE_AUDIO  = 15,
 	VX_ERR_FILE_NOT_FOUND  = 16,
+	VX_ERR_INIT_FILTER     = 17,
 } vx_error;
 
 typedef enum {

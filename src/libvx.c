@@ -178,17 +178,14 @@ static AVFilterContext* vx_get_filter(const AVFilterGraph* filter_graph, const c
 
 static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* args)
 {
-	vx_error result = VX_ERR_UNKNOWN;
+	vx_error result = VX_ERR_INIT_FILTER;
 	AVFilterGraph* graph = (*last_filter)->graph;
 	AVFilterContext* filter_ctx;
-	int ret;
 
-	ret = avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_name, args, NULL, graph);
-	if (ret < 0)
+	if (avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_name, args, NULL, graph) < 0)
 		return result;
 
-	ret = avfilter_link(*last_filter, *pad_index, filter_ctx, 0);
-	if (ret < 0)
+	if (avfilter_link(*last_filter, *pad_index, filter_ctx, 0) < 0)
 		return result;
 
 	*last_filter = filter_ctx;
@@ -199,7 +196,7 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 
 static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
-	vx_error ret = VX_ERR_UNKNOWN;
+	vx_error result = VX_ERR_UNKNOWN;
 
 	uint8_t* displaymatrix = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, NULL);
 
@@ -219,13 +216,13 @@ static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_tra
 			*out_transform_args = "dir=cclock";
 		}
 
-		ret = VX_ERR_SUCCESS;
+		result = VX_ERR_SUCCESS;
 	}
 	else {
-		ret = VX_ERR_STREAM_INFO;
+		result = VX_ERR_STREAM_INFO;
 	}
 
-	return ret;
+	return result;
 }
 
 static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, int* pad_index)
@@ -242,8 +239,9 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	return vx_insert_filter(last_filter, pad_index, transform, transform_args);
 }
 
-static int vx_initialize_filters(vx_video* video, const char* filters_descr)
+static vx_error vx_initialize_filters(vx_video* video, const char* filters_descr)
 {
+	vx_error result = VX_ERR_INIT_FILTER;
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
 	const AVFilter* buffersrc = avfilter_get_by_name("buffer");
 	const AVFilter* buffersink = avfilter_get_by_name("buffersink");
@@ -255,13 +253,12 @@ static int vx_initialize_filters(vx_video* video, const char* filters_descr)
 	AVRational time_base = video_stream->time_base;
 	int pad_index = 0;
 	char args[512];
-	int ret = 0;
 
 	video->filter_pipeline = avfilter_graph_alloc();
 
 	if (!outputs || !inputs || !video->filter_pipeline) {
-		ret = AVERROR(ENOMEM);
-		goto end;
+		result = VX_ERR_ALLOCATE;
+		goto cleanup;
 	}
 
 	snprintf(args, sizeof(args),
@@ -270,17 +267,15 @@ static int vx_initialize_filters(vx_video* video, const char* filters_descr)
 		time_base.num, time_base.den,
 		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
 
-	ret = avfilter_graph_create_filter(&filter_source, buffersrc, "in", args, NULL, video->filter_pipeline);
-	if (ret < 0) {
+	if (avfilter_graph_create_filter(&filter_source, buffersrc, "in", args, NULL, video->filter_pipeline) < 0) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
-		goto end;
+		goto cleanup;
 	}
 
 	/* buffer video sink: to terminate the filter chain. */
-	ret = avfilter_graph_create_filter(&filter_sink, buffersink, "out", NULL, NULL, video->filter_pipeline);
-	if (ret < 0) {
+	if (avfilter_graph_create_filter(&filter_sink, buffersink, "out", NULL, NULL, video->filter_pipeline) < 0) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
-		goto end;
+		goto cleanup;
 	}
 
 	// Use the provided filters, if any
@@ -295,26 +290,28 @@ static int vx_initialize_filters(vx_video* video, const char* filters_descr)
 		inputs->pad_idx = pad_index;
 		inputs->next = NULL;
 
-		if ((ret = avfilter_graph_parse_ptr(video->filter_pipeline, filters_descr, &inputs, &outputs, NULL)) < 0)
-			goto end;
+		if (avfilter_graph_parse_ptr(video->filter_pipeline, filters_descr, &inputs, &outputs, NULL) < 0) {
+			goto cleanup;
+		}
 	}
 	else {
 		last_filter = filter_source;
-		if (ret >= 0) ret = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index);
-		if (ret >= 0) ret = avfilter_link(last_filter, pad_index, filter_sink, pad_index);
-		if (ret < 0) {
-			goto end;
-		}
+		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+			goto cleanup;
+		if (avfilter_link(last_filter, pad_index, filter_sink, pad_index) < 0)
+			goto cleanup;
 	}
 
-	if ((ret = avfilter_graph_config(video->filter_pipeline, NULL)) < 0)
-		goto end;
+	// Finally, construct the filter graph using all the linked nodes
+	if (avfilter_graph_config(video->filter_pipeline, NULL) < 0) {
+		goto cleanup;
+	}
 
-end:
+cleanup:
 	avfilter_inout_free(&inputs);
 	avfilter_inout_free(&outputs);
 
-	return ret;
+	return result;
 }
 
 static bool use_hw(const vx_video video, const AVCodec* codec)
