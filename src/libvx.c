@@ -51,8 +51,9 @@ struct vx_video
 	AVCodecContext* video_codec_ctx;
 	AVCodecContext* audio_codec_ctx;
 	SwrContext* swr_ctx;
-	enum AVPixelFormat hw_pix_fmt;
+
 	AVBufferRef* hw_device_ctx;
+	enum AVPixelFormat hw_pix_fmt;
 
 	AVFilterGraph* filter_pipeline;
 
@@ -240,11 +241,31 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	char* transform_args = NULL;
 
 	result = vx_get_rotation_transform(stream, &transform, &transform_args);
-	if (result != VX_ERR_SUCCESS) {
+	if (result != VX_ERR_SUCCESS && result != VX_ERR_STREAM_INFO) {
 		return result;
 	}
+	
+	return transform
+		? vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args)
+		: VX_ERR_SUCCESS;
+}
 
-	return vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args);
+static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
+{
+	enum AVPixelFormat format = AV_PIX_FMT_NONE;
+
+	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
+
+	if (frame_constraints) {
+		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
+		// The list of format is always terminated by AV_PIX_FMT_NONE,
+		// or the list will be NULL if the information is not known
+		format = frame_constraints->valid_sw_formats[0];
+
+		av_hwframe_constraints_free(&frame_constraints);
+	}
+
+	return format;
 }
 
 static vx_error vx_init_filter_pipeline(vx_video* video)
@@ -263,9 +284,21 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 		goto cleanup;
 	}
 
+	// Set the correct pixel format, we need to find the format that a hardware frame will
+	// be converted to after transferring to system memory, but before converting via scaling
+	enum AVPixelFormat format = video->video_codec_ctx->pix_fmt;
+	if (video->hw_device_ctx)
+	{
+		format = vx_get_hw_pixel_format(video->hw_device_ctx);
+		if (!format) {
+			av_log(NULL, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
+			goto cleanup;
+		}
+	}
+
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-		video->video_codec_ctx->width, video->video_codec_ctx->height, video->video_codec_ctx->pix_fmt,
+		video->video_codec_ctx->width, video->video_codec_ctx->height, format,
 		video_stream->time_base.num, video_stream->time_base.den,
 		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
 
@@ -1012,7 +1045,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 
 		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0)
 		{
-			dprintf("Error transferring the data to system memory\n");
+			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
 			goto cleanup;
 		}
 
