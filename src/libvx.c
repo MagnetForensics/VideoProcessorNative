@@ -788,6 +788,9 @@ static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame*
 			goto cleanup;
 		}
 
+		// The frame is being reused so we have to tidy it up, otherwise it will leak memory
+		av_frame_unref(av_frame);
+
 		while (ret == 0) {
 			ret = av_buffersink_get_frame(filter_sink, av_frame);
 
