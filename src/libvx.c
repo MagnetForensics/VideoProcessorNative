@@ -141,6 +141,24 @@ static enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
 	return formats[fmt];
 }
 
+static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
+{
+	enum AVPixelFormat format = AV_PIX_FMT_NONE;
+
+	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
+
+	if (frame_constraints) {
+		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
+		// The list of format is always terminated by AV_PIX_FMT_NONE,
+		// or the list will be NULL if the information is not known
+		format = frame_constraints->valid_sw_formats[0];
+
+		av_hwframe_constraints_free(&frame_constraints);
+	}
+
+	return format;
+}
+
 static bool vx_is_packet_error(int result)
 {
 	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
@@ -236,24 +254,6 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	return transform
 		? vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args)
 		: VX_ERR_SUCCESS;
-}
-
-static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
-{
-	enum AVPixelFormat format = AV_PIX_FMT_NONE;
-
-	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
-
-	if (frame_constraints) {
-		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
-		// The list of format is always terminated by AV_PIX_FMT_NONE,
-		// or the list will be NULL if the information is not known
-		format = frame_constraints->valid_sw_formats[0];
-
-		av_hwframe_constraints_free(&frame_constraints);
-	}
-
-	return format;
 }
 
 static vx_error vx_init_filter_pipeline(vx_video* video)
@@ -779,6 +779,7 @@ static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame*
 		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
 
 		if (!(filter_source && filter_sink)) {
+			result = VX_ERR_INIT_FILTER;
 			goto cleanup;
 		}
 
