@@ -201,18 +201,6 @@ static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_tra
 	return result;
 }
 
-static AVFilterContext* vx_get_filter(const AVFilterGraph* filter_graph, const char* name)
-{
-	for (int i = 0; i < filter_graph->nb_filters; i++) {
-		AVFilterContext* filter = filter_graph->filters[i];
-		if (*filter->name == *name) {
-			return filter;
-		}
-	}
-
-	return NULL;
-}
-
 static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* filter_label, const char* args)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
@@ -787,8 +775,8 @@ static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame*
 	int ret = 0;
 
 	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
-		const AVFilterContext* filter_source = vx_get_filter(video->filter_pipeline, "in");
-		const AVFilterContext* filter_sink = vx_get_filter(video->filter_pipeline, "out");
+		const AVFilterContext* filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
+		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
 
 		if (!(filter_source && filter_sink)) {
 			goto cleanup;
