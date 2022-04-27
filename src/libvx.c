@@ -304,8 +304,10 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 
 	// Create and link up the filter nodes
 	last_filter = filter_source;
-	if (video->options.autorotate && (result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
-		goto cleanup;
+	if (video->options.autorotate)
+		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+			goto cleanup;
+
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
@@ -409,7 +411,7 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	if (*out_stream < 0)
 	{
 		if (*out_stream == AVERROR_STREAM_NOT_FOUND)
-			*out_error = VX_ERR_VIDEO_STREAM;
+			*out_error = type == AVMEDIA_TYPE_AUDIO ? VX_ERR_NO_AUDIO : VX_ERR_VIDEO_STREAM;
 
 		if (*out_stream == AVERROR_DECODER_NOT_FOUND)
 			*out_error = VX_ERR_FIND_CODEC;
@@ -491,17 +493,20 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		goto cleanup;
 	}
 
-	if (me->video_codec_ctx->pix_fmt == AV_PIX_FMT_NONE) {
-		error = VX_ERR_PIXEL_ASPECT;
-		goto cleanup;
-	}
-
 	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO,&me->audio_stream, &me->audio_codec_ctx, &error)) {
-		dprintf("no audio stream\n");
+		if (me->video_codec_ctx->pix_fmt == AV_PIX_FMT_NONE) {
+			// The file doesn't contain video or audio information, but don't exit
+			// as we can still get some useful information out by opening the file
+			av_log(NULL, AV_LOG_ERROR, "The file does not contain any frame images or audio data\n");
+		}
+		else {
+			av_log(NULL, AV_LOG_INFO, "The file does not contain any audio data\n");
+		}
 	}
 
-	if ((error = vx_init_filter_pipeline(me)) != VX_ERR_SUCCESS) {
-		goto cleanup;
+	if (me->video_codec_ctx->pix_fmt != AV_PIX_FMT_NONE) {
+		if ((error = vx_init_filter_pipeline(me)) != VX_ERR_SUCCESS)
+			goto cleanup;
 	}
 
 	*video = me;
