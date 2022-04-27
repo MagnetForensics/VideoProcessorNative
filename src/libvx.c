@@ -491,6 +491,11 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		goto cleanup;
 	}
 
+	if (me->video_codec_ctx->pix_fmt == AV_PIX_FMT_NONE) {
+		error = VX_ERR_PIXEL_ASPECT;
+		goto cleanup;
+	}
+
 	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO,&me->audio_stream, &me->audio_codec_ctx, &error)) {
 		dprintf("no audio stream\n");
 	}
