@@ -9,15 +9,16 @@ extern "C" {
 #define VX_CDECL __cdecl
 
 typedef struct vx_video vx_video;
+typedef struct vx_video_options vx_video_options;
 typedef struct vx_frame vx_frame;
 
 typedef enum {
-	VX_LOG_NONE = 0,
-	VX_LOG_FATAL = 1,
-	VX_LOG_ERROR = 2,
+	VX_LOG_NONE    = 0,
+	VX_LOG_FATAL   = 1,
+	VX_LOG_ERROR   = 2,
 	VX_LOG_WARNING = 3,
-	VX_LOG_INFO = 4,
-	VX_LOG_DEBUG = 5
+	VX_LOG_INFO    = 4,
+	VX_LOG_DEBUG   = 5
 } vx_log_level;
 
 typedef enum {
@@ -59,24 +60,22 @@ typedef enum {
 	VX_FF_HAS_PTS = 4
 } vx_frame_flag;
 
-typedef enum
-{
-	// logically OR'ed
-	VX_OF_HW_ACCEL_ALL = 1,
-	VX_OF_HW_ACCEL_720 = 2,
-	VX_OF_HW_ACCEL_1080 = 4,
-	VX_OF_HW_ACCEL_1440 = 8,
-	VX_OF_HW_ACCEL_2160 = 16,
-	VX_OF_HW_ACCEL_HEVC = 32,
-	VX_OF_HW_ACCEL_H264 = 64
-} vx_open_flags;
+typedef enum {
+	VX_HW_ACCEL_ALL  = 1,
+	VX_HW_ACCEL_720  = 2,
+	VX_HW_ACCEL_1080 = 4,
+	VX_HW_ACCEL_1440 = 8,
+	VX_HW_ACCEL_2160 = 16,
+	VX_HW_ACCEL_HEVC = 32,
+	VX_HW_ACCEL_H264 = 64
+} vx_hwaccel_flag;
 
 typedef void (*vx_audio_callback)(const void* samples, int num_samples, double ts, void* user_data);
 typedef void (*vx_log_callback)(const char* message, int level);
 
 VX_DECLSPEC void VX_CDECL vx_log_set_cb(vx_log_callback cb);
 
-VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, int flags);
+VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, const vx_video_options options);
 VX_DECLSPEC void VX_CDECL vx_close(vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_width(const vx_video* video);

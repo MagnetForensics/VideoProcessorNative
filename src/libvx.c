@@ -28,6 +28,10 @@
 #define dprintf(...)
 #endif
 
+#define FRAME_QUEUE_SIZE 16
+#define FRAME_BUFFER_PADDING 4096
+#define LOG_TRACE_BUFSIZE 4096
+
 static bool initialized = false;
 static int retry_count = 100;
 static vx_log_callback log_cb = NULL;
@@ -41,9 +45,11 @@ struct vx_frame
 	void* buffer;
 };
 
-#define FRAME_QUEUE_SIZE 16
-#define FRAME_BUFFER_PADDING 4096
-#define LOG_TRACE_BUFSIZE 4096
+struct vx_video_options
+{
+	bool autorotate;
+	vx_hwaccel_flag hw_criteria;
+};
 
 struct vx_video
 {
@@ -82,7 +88,7 @@ struct vx_video
 	int num_queue;
 	AVFrame* frame_queue[FRAME_QUEUE_SIZE + 1];
 
-	int open_flags;
+	vx_video_options options;
 	double last_ts;
 };
 
@@ -298,7 +304,7 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 
 	// Create and link up the filter nodes
 	last_filter = filter_source;
-	if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+	if (video->options.autorotate && (result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
 		goto cleanup;
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
@@ -312,27 +318,29 @@ cleanup:
 	return result;
 }
 
-static bool use_hw(const vx_video video, const AVCodec* codec)
+static bool use_hw(const vx_video* video, const AVCodec* codec)
 {
-	if (video.open_flags & VX_OF_HW_ACCEL_ALL)
+	if (video->options.hw_criteria & VX_HW_ACCEL_ALL)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_720 && vx_get_height(&video) >= 720)
+	int height = vx_get_height(video);
+
+	if (video->options.hw_criteria & VX_HW_ACCEL_720 && height >= 720)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_1080 && vx_get_height(&video) >= 1080)
+	if (video->options.hw_criteria & VX_HW_ACCEL_1080 && height >= 1080)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_1440 && vx_get_height(&video) >= 1440)
+	if (video->options.hw_criteria & VX_HW_ACCEL_1440 && height >= 1440)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_2160 && vx_get_height(&video) >= 2160)
+	if (video->options.hw_criteria & VX_HW_ACCEL_2160 && height >= 2160)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_HEVC && codec->id == AV_CODEC_ID_HEVC)
+	if (video->options.hw_criteria & VX_HW_ACCEL_HEVC && codec->id == AV_CODEC_ID_HEVC)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_H264 && codec->id == AV_CODEC_ID_H264)
+	if (video->options.hw_criteria & VX_HW_ACCEL_H264 && codec->id == AV_CODEC_ID_H264)
 		return true;
 
 	return false;
@@ -419,7 +427,7 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	*out_codec_ctx = codec_ctx;
 
 	// Find and enable any hardware acceleration support
-	const AVCodecHWConfig* hw_config = use_hw(*me, codec) ? get_hw_config(codec) : NULL;
+	const AVCodecHWConfig* hw_config = use_hw(me, codec) ? get_hw_config(codec) : NULL;
 
 	if (hw_config != NULL)
 	{
@@ -437,7 +445,7 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	return true;
 }
 
-vx_error vx_open(vx_video** video, const char* filename, int flags)
+vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options)
 {
 	if (!initialized) {
 		// Log messages with this level, or lower, will be send to stderror
@@ -455,8 +463,8 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		return VX_ERR_ALLOCATE;
 
 	me->hw_pix_fmt = AV_PIX_FMT_NONE;
-	me->open_flags = flags;
 	me->last_ts = -1;
+	me->options = options;
 
 	vx_error error = VX_ERR_UNKNOWN;
 
@@ -483,7 +491,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		goto cleanup;
 	}
 
-	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO, &me->audio_stream, &me->audio_codec_ctx, &error)) {
+	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO,&me->audio_stream, &me->audio_codec_ctx, &error)) {
 		dprintf("no audio stream\n");
 	}
 
@@ -584,24 +592,25 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	return VX_ERR_SUCCESS;
 }
 
-static bool vx_video_is_rotated(const vx_video* video)
+static bool vx_video_is_rotated(vx_video video)
 {
 	char* transform = NULL;
 	char* transform_args = NULL;
 
-	return vx_get_rotation_transform(video->fmt_ctx->streams[video->video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
+	return video.options.autorotate
+		&& vx_get_rotation_transform(video.fmt_ctx->streams[video.video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
 		&& transform == "transpose"
 		&& (transform_args == "dir=clock" || transform_args == "dir=cclock");
 }
 
 int vx_get_width(const vx_video* me)
 {
-	return vx_video_is_rotated(me) ? me->video_codec_ctx->height : me->video_codec_ctx->width;
+	return vx_video_is_rotated(*me) ? me->video_codec_ctx->height : me->video_codec_ctx->width;
 }
 
 int vx_get_height(const vx_video* me)
 {
-	return vx_video_is_rotated(me) ? me->video_codec_ctx->width : me->video_codec_ctx->height;
+	return vx_video_is_rotated(*me) ? me->video_codec_ctx->width : me->video_codec_ctx->height;
 }
 
 long long vx_get_file_position(const vx_video* video)
