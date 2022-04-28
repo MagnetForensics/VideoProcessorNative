@@ -61,13 +61,13 @@ typedef enum {
 } vx_frame_flag;
 
 typedef enum {
-	VX_HW_ACCEL_ALL  = 1,
-	VX_HW_ACCEL_720  = 2,
-	VX_HW_ACCEL_1080 = 4,
-	VX_HW_ACCEL_1440 = 8,
-	VX_HW_ACCEL_2160 = 16,
-	VX_HW_ACCEL_HEVC = 32,
-	VX_HW_ACCEL_H264 = 64
+	VX_HW_ACCEL_ALL  = 1 << 1,
+	VX_HW_ACCEL_720  = 1 << 2,
+	VX_HW_ACCEL_1080 = 1 << 3,
+	VX_HW_ACCEL_1440 = 1 << 4,
+	VX_HW_ACCEL_2160 = 1 << 5,
+	VX_HW_ACCEL_HEVC = 1 << 6,
+	VX_HW_ACCEL_H264 = 1 << 7
 } vx_hwaccel_flag;
 
 typedef void (*vx_audio_callback)(const void* samples, int num_samples, double ts, void* user_data);
