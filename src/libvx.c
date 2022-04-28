@@ -5,11 +5,15 @@
 #include <assert.h>
 
 #include <libavcodec/avcodec.h>
-#include <libavutil/mathematics.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
+#include <libavformat/avformat.h>
+#include "libavutil/display.h"
 #include <libavutil/imgutils.h>
+#include <libavutil/mathematics.h>
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
-#include <libavformat/avformat.h>
 #include <libswresample/swresample.h>
 
 #include "libvx.h"
@@ -24,6 +28,10 @@
 #define dprintf(...)
 #endif
 
+#define FRAME_QUEUE_SIZE 16
+#define FRAME_BUFFER_PADDING 4096
+#define LOG_TRACE_BUFSIZE 4096
+
 static bool initialized = false;
 static int retry_count = 100;
 static vx_log_callback log_cb = NULL;
@@ -37,9 +45,11 @@ struct vx_frame
 	void* buffer;
 };
 
-#define FRAME_QUEUE_SIZE 16
-#define FRAME_BUFFER_PADDING 4096
-#define LOG_TRACE_BUFSIZE 4096
+struct vx_video_options
+{
+	bool autorotate;
+	vx_hwaccel_flag hw_criteria;
+};
 
 struct vx_video
 {
@@ -47,8 +57,11 @@ struct vx_video
 	AVCodecContext* video_codec_ctx;
 	AVCodecContext* audio_codec_ctx;
 	SwrContext* swr_ctx;
-	enum AVPixelFormat hw_pix_fmt;
+
 	AVBufferRef* hw_device_ctx;
+	enum AVPixelFormat hw_pix_fmt;
+
+	AVFilterGraph* filter_pipeline;
 
 	int video_stream;
 	int audio_stream;
@@ -75,7 +88,7 @@ struct vx_video
 	int num_queue;
 	AVFrame* frame_queue[FRAME_QUEUE_SIZE + 1];
 
-	int open_flags;
+	vx_video_options options;
 	double last_ts;
 };
 
@@ -134,6 +147,29 @@ static enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
 	return formats[fmt];
 }
 
+static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
+{
+	enum AVPixelFormat format = AV_PIX_FMT_NONE;
+
+	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
+
+	if (frame_constraints) {
+		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
+		// The list of format is always terminated by AV_PIX_FMT_NONE,
+		// or the list will be NULL if the information is not known
+		format = frame_constraints->valid_sw_formats[0];
+
+		av_hwframe_constraints_free(&frame_constraints);
+	}
+
+	return format;
+}
+
+static bool vx_is_packet_error(int result)
+{
+	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
+}
+
 static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
 {
 	const AVFrame* frame_a = *(AVFrame**)a;
@@ -158,27 +194,155 @@ static AVFrame* vx_get_first_queue_item(const vx_video* video)
 	return video->frame_queue[video->num_queue - 1];
 }
 
-static bool use_hw(const vx_video video, const AVCodec* codec)
+static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
-	if (video.open_flags & VX_OF_HW_ACCEL_ALL)
+	vx_error result = VX_ERR_UNKNOWN;
+
+	uint8_t* displaymatrix = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, NULL);
+
+	if (displaymatrix) {
+		double theta = av_display_rotation_get((int32_t*)displaymatrix);
+
+		if (theta < -135 || theta > 135) {
+			*out_transform = "vflip, hflip";
+			*out_transform_args = NULL;
+		}
+		else if (theta < -45) {
+			*out_transform = "transpose";
+			*out_transform_args = "dir=clock";
+		}
+		else if (theta > 45) {
+			*out_transform = "transpose";
+			*out_transform_args = "dir=cclock";
+		}
+
+		result = VX_ERR_SUCCESS;
+	}
+	else {
+		result = VX_ERR_STREAM_INFO;
+	}
+
+	return result;
+}
+
+static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* filter_label, const char* args)
+{
+	vx_error result = VX_ERR_INIT_FILTER;
+	AVFilterGraph* graph = (*last_filter)->graph;
+	AVFilterContext* filter_ctx;
+	if (!filter_label) {
+		filter_label = filter_name;
+	}
+
+	if (avfilter_graph_create_filter(&filter_ctx, avfilter_get_by_name(filter_name), filter_label, args, NULL, graph) < 0)
+		return result;
+
+	if (avfilter_link(*last_filter, *pad_index, filter_ctx, 0) < 0)
+		return result;
+
+	*last_filter = filter_ctx;
+	*pad_index = 0;
+
+	return VX_ERR_SUCCESS;
+}
+
+static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterContext** last_filter, const int* pad_index)
+{
+	int result = VX_ERR_UNKNOWN;
+	char* transform = NULL;
+	char* transform_args = NULL;
+
+	result = vx_get_rotation_transform(stream, &transform, &transform_args);
+	if (result != VX_ERR_SUCCESS && result != VX_ERR_STREAM_INFO) {
+		return result;
+	}
+	
+	return transform
+		? vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args)
+		: VX_ERR_SUCCESS;
+}
+
+static vx_error vx_init_filter_pipeline(vx_video* video)
+{
+	vx_error result = VX_ERR_INIT_FILTER;
+	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
+	AVFilterContext* filter_source;
+	AVFilterContext* last_filter;
+	int pad_index = 0;
+	char args[512];
+
+	video->filter_pipeline = avfilter_graph_alloc();
+
+	if (!video->filter_pipeline) {
+		result = VX_ERR_ALLOCATE;
+		goto cleanup;
+	}
+
+	// Set the correct pixel format, we need to find the format that a hardware frame will
+	// be converted to after transferring to system memory, but before converting via scaling
+	enum AVPixelFormat format = video->video_codec_ctx->pix_fmt;
+	if (video->hw_device_ctx)
+	{
+		format = vx_get_hw_pixel_format(video->hw_device_ctx);
+		if (!format) {
+			av_log(NULL, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
+			goto cleanup;
+		}
+	}
+
+	snprintf(args, sizeof(args),
+		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+		video->video_codec_ctx->width, video->video_codec_ctx->height, format,
+		video_stream->time_base.num, video_stream->time_base.den,
+		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
+
+	// Create the filter pipeline source
+	if (avfilter_graph_create_filter(&filter_source, avfilter_get_by_name("buffer"), "in", args, NULL, video->filter_pipeline) < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+		goto cleanup;
+	}
+
+	// Create and link up the filter nodes
+	last_filter = filter_source;
+	if (video->options.autorotate)
+		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+			goto cleanup;
+
+	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
+		goto cleanup;
+
+	// Finally, construct the filter graph using all the linked nodes
+	if (avfilter_graph_config(video->filter_pipeline, NULL) < 0) {
+		goto cleanup;
+	}
+
+cleanup:
+	return result;
+}
+
+static bool use_hw(const vx_video* video, const AVCodec* codec)
+{
+	if (video->options.hw_criteria & VX_HW_ACCEL_ALL)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_720 && vx_get_height(&video) >= 720)
+	int height = vx_get_height(video);
+
+	if (video->options.hw_criteria & VX_HW_ACCEL_720 && height >= 720)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_1080 && vx_get_height(&video) >= 1080)
+	if (video->options.hw_criteria & VX_HW_ACCEL_1080 && height >= 1080)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_1440 && vx_get_height(&video) >= 1440)
+	if (video->options.hw_criteria & VX_HW_ACCEL_1440 && height >= 1440)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_2160 && vx_get_height(&video) >= 2160)
+	if (video->options.hw_criteria & VX_HW_ACCEL_2160 && height >= 2160)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_HEVC && codec->id == AV_CODEC_ID_HEVC)
+	if (video->options.hw_criteria & VX_HW_ACCEL_HEVC && codec->id == AV_CODEC_ID_HEVC)
 		return true;
 
-	if (video.open_flags & VX_OF_HW_ACCEL_H264 && codec->id == AV_CODEC_ID_H264)
+	if (video->options.hw_criteria & VX_HW_ACCEL_H264 && codec->id == AV_CODEC_ID_H264)
 		return true;
 
 	return false;
@@ -240,13 +404,14 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	int* out_stream, AVCodecContext** out_codec_ctx, vx_error* out_error)
 {
 	AVCodec* codec;
+	AVCodecContext* codec_ctx;
 
 	*out_stream = av_find_best_stream(me->fmt_ctx, type, -1, -1, &codec, 0);
 
 	if (*out_stream < 0)
 	{
 		if (*out_stream == AVERROR_STREAM_NOT_FOUND)
-			*out_error = VX_ERR_VIDEO_STREAM;
+			*out_error = type == AVMEDIA_TYPE_AUDIO ? VX_ERR_NO_AUDIO : VX_ERR_VIDEO_STREAM;
 
 		if (*out_stream == AVERROR_DECODER_NOT_FOUND)
 			*out_error = VX_ERR_FIND_CODEC;
@@ -255,10 +420,16 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	}
 
 	// Get a pointer to the codec context for the video stream
-	*out_codec_ctx = me->fmt_ctx->streams[*out_stream]->codec;
+	codec_ctx = avcodec_alloc_context3(codec);
+	if (!codec_ctx) {
+		*out_error = VX_ERR_ALLOCATE;
+		return false;
+	}
+	avcodec_parameters_to_context(codec_ctx, me->fmt_ctx->streams[*out_stream]->codecpar);
+	*out_codec_ctx = codec_ctx;
 
 	// Find and enable any hardware acceleration support
-	const AVCodecHWConfig* hw_config = use_hw(*me, codec) ? get_hw_config(codec) : NULL;
+	const AVCodecHWConfig* hw_config = use_hw(me, codec) ? get_hw_config(codec) : NULL;
 
 	if (hw_config != NULL)
 	{
@@ -276,7 +447,7 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	return true;
 }
 
-vx_error vx_open(vx_video** video, const char* filename, int flags)
+vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options)
 {
 	if (!initialized) {
 		// Log messages with this level, or lower, will be send to stderror
@@ -294,8 +465,8 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		return VX_ERR_ALLOCATE;
 
 	me->hw_pix_fmt = AV_PIX_FMT_NONE;
-	me->open_flags = flags;
 	me->last_ts = -1;
+	me->options = options;
 
 	vx_error error = VX_ERR_UNKNOWN;
 
@@ -312,7 +483,7 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 	}
 
 	// Get stream information
-	if (avformat_find_stream_info(me->fmt_ctx, /*&options*/ NULL) < 0) {
+	if (avformat_find_stream_info(me->fmt_ctx, NULL) < 0) {
 		error = VX_ERR_STREAM_INFO;
 		goto cleanup;
 	}
@@ -322,8 +493,20 @@ vx_error vx_open(vx_video** video, const char* filename, int flags)
 		goto cleanup;
 	}
 
-	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO, &me->audio_stream, &me->audio_codec_ctx, &error)) {
-		dprintf("no audio stream\n");
+	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO,&me->audio_stream, &me->audio_codec_ctx, &error)) {
+		if (me->video_codec_ctx->pix_fmt == AV_PIX_FMT_NONE) {
+			// The file doesn't contain video or audio information, but don't exit
+			// as we can still get some useful information out by opening the file
+			av_log(NULL, AV_LOG_ERROR, "The file does not contain any frame images or audio data\n");
+		}
+		else {
+			av_log(NULL, AV_LOG_INFO, "The file does not contain any audio data\n");
+		}
+	}
+
+	if (me->video_codec_ctx->pix_fmt != AV_PIX_FMT_NONE) {
+		if ((error = vx_init_filter_pipeline(me)) != VX_ERR_SUCCESS)
+			goto cleanup;
 	}
 
 	*video = me;
@@ -339,6 +522,9 @@ void vx_close(vx_video* video)
 	if (!video) {
 		return;
 	}
+
+	if (video->filter_pipeline)
+		avfilter_graph_free(&video->filter_pipeline);
 
 	if (video->swr_ctx)
 		swr_free(&video->swr_ctx);
@@ -416,14 +602,25 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	return VX_ERR_SUCCESS;
 }
 
+static bool vx_video_is_rotated(vx_video video)
+{
+	char* transform = NULL;
+	char* transform_args = NULL;
+
+	return video.options.autorotate
+		&& vx_get_rotation_transform(video.fmt_ctx->streams[video.video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
+		&& transform == "transpose"
+		&& (transform_args == "dir=clock" || transform_args == "dir=cclock");
+}
+
 int vx_get_width(const vx_video* me)
 {
-	return me->video_codec_ctx->width;
+	return vx_video_is_rotated(*me) ? me->video_codec_ctx->height : me->video_codec_ctx->width;
 }
 
 int vx_get_height(const vx_video* me)
 {
-	return me->video_codec_ctx->height;
+	return vx_video_is_rotated(*me) ? me->video_codec_ctx->width : me->video_codec_ctx->height;
 }
 
 long long vx_get_file_position(const vx_video* video)
@@ -536,7 +733,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		: me->audio_codec_ctx;
 
 	int result = avcodec_send_packet(codec_ctx, packet);
-	if (result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF) {
+	if (vx_is_packet_error(result)) {
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
 	}
@@ -589,6 +786,47 @@ cleanup:
 	av_packet_free(&packet);
 
 	return ret;
+}
+
+static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame* av_frame)
+{
+	vx_error result = VX_ERR_UNKNOWN;
+	int ret = 0;
+
+	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
+		const AVFilterContext* filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
+		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
+
+		if (!(filter_source && filter_sink)) {
+			result = VX_ERR_INIT_FILTER;
+			goto cleanup;
+		}
+
+		if (av_buffersrc_add_frame_flags(filter_source, av_frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+			av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
+			goto cleanup;
+		}
+
+		// The frame is being reused so we have to tidy it up, otherwise it will leak memory
+		av_frame_unref(av_frame);
+
+		while (ret == 0) {
+			ret = av_buffersink_get_frame(filter_sink, av_frame);
+
+			if (vx_is_packet_error(ret)) {
+				av_log(NULL, AV_LOG_ERROR, "Error retrieving frames from the filtergraph\n");
+				goto cleanup;
+			}
+		}
+
+		frame->width = av_frame->width;
+		frame->height = av_frame->height;
+	}
+
+	result = VX_ERR_SUCCESS;
+
+cleanup:
+	return result;
 }
 
 static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
@@ -818,15 +1056,22 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 
 		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0)
 		{
-			dprintf("Error transferring the data to system memory\n");
+			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
 			goto cleanup;
 		}
 
 		av_frame = sw_frame;
 	}
 
+	// Run the frame through the filter pipeline, if any
+	if (vx_filter_frame(video, frame, av_frame) != VX_ERR_SUCCESS) {
+		goto cleanup;
+	}
+
 	// Fill the buffer
-	vx_scale_frame(av_frame, frame);
+	if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
+		goto cleanup;
+	}
 
 	if (hw_decoded) {
 		av_frame_unref(av_frame);
