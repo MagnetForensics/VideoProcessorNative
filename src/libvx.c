@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <string.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
@@ -204,7 +205,7 @@ static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_tra
 		double theta = av_display_rotation_get((int32_t*)displaymatrix);
 
 		if (theta < -135 || theta > 135) {
-			*out_transform = "vflip, hflip";
+			*out_transform = "vflip,hflip";
 			*out_transform_args = NULL;
 		}
 		else if (theta < -45) {
@@ -251,15 +252,31 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	int result = VX_ERR_UNKNOWN;
 	char* transform = NULL;
 	char* transform_args = NULL;
+	const char* token = NULL;
 
 	result = vx_get_rotation_transform(stream, &transform, &transform_args);
 	if (result != VX_ERR_SUCCESS && result != VX_ERR_STREAM_INFO) {
 		return result;
 	}
+
+	if (transform) {
+		// Parse each filter separately if several are returned
+		size_t transform_size = strlen(transform) + 1;
+		char* src = malloc(transform_size);
+		if (!src)
+			return VX_ERR_ALLOCATE;
+		memcpy(src, transform, transform_size);
+		token = strtok(src, ",");
+
+		while (token) {
+			if ((result = vx_insert_filter(last_filter, pad_index, token, NULL, transform_args)) != VX_ERR_SUCCESS)
+				break;
+			token = strtok(NULL, ",");
+		}
+		free(src);
+	}
 	
-	return transform
-		? vx_insert_filter(last_filter, pad_index, transform, NULL, transform_args)
-		: VX_ERR_SUCCESS;
+	return VX_ERR_SUCCESS;
 }
 
 static vx_error vx_init_filter_pipeline(vx_video* video)
