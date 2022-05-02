@@ -11,6 +11,7 @@ extern "C" {
 typedef struct vx_video vx_video;
 typedef struct vx_video_options vx_video_options;
 typedef struct vx_frame vx_frame;
+typedef struct vx_rectangle vx_rectangle;
 
 typedef enum {
 	VX_LOG_NONE    = 0,

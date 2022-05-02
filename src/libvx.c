@@ -37,6 +37,14 @@ static bool initialized = false;
 static int retry_count = 100;
 static vx_log_callback log_cb = NULL;
 
+struct vx_rectangle
+{
+	int x;
+	int y;
+	int width;
+	int height;
+};
+
 struct vx_frame
 {
 	int width;
@@ -49,6 +57,7 @@ struct vx_frame
 struct vx_video_options
 {
 	bool autorotate;
+	vx_rectangle crop_area;
 	vx_hwaccel_flag hw_criteria;
 };
 
@@ -171,6 +180,11 @@ static bool vx_is_packet_error(int result)
 	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
 }
 
+static bool vx_rectangle_is_initialized(vx_rectangle rect)
+{
+	return (rect.x + rect.y + rect.width + rect.height) > 0;
+}
+
 static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
 {
 	const AVFrame* frame_a = *(AVFrame**)a;
@@ -243,6 +257,23 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 
 	*last_filter = filter_ctx;
 	*pad_index = 0;
+
+	return VX_ERR_SUCCESS;
+}
+
+static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, const vx_rectangle crop_area)
+{
+	int result = VX_ERR_UNKNOWN;
+	char transform_args[100];
+
+	snprintf(transform_args, sizeof(transform_args),
+		"w=%d:h=%d:x=%d:y=%d",
+		crop_area.width, crop_area.height, crop_area.x, crop_area.y);
+
+	if (transform_args) {
+		if ((result = vx_insert_filter(last_filter, pad_index, "crop", NULL, transform_args)) != VX_ERR_SUCCESS)
+			return result;
+	}
 
 	return VX_ERR_SUCCESS;
 }
@@ -323,6 +354,10 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 	last_filter = filter_source;
 	if (video->options.autorotate)
 		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+			goto cleanup;
+
+	if (vx_rectangle_is_initialized(video->options.crop_area))
+		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
