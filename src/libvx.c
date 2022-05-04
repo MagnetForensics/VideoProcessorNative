@@ -267,7 +267,7 @@ static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const i
 	char transform_args[100];
 
 	snprintf(transform_args, sizeof(transform_args),
-		"w=%d:h=%d:x=%d:y=%d",
+		"w=%d:h=%d:x=%d:y=%d:exact=1",
 		crop_area.width, crop_area.height, crop_area.x, crop_area.y);
 
 	if (transform_args) {
