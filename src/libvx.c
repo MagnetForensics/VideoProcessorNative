@@ -1023,6 +1023,7 @@ vx_error vx_frame_step_internal(vx_video* me, double* out_timestamp_seconds, vx_
 	}
 	else if (ret == VX_ERR_FRAME_DEFERRED) {
 		*out_timestamp_seconds = me->last_ts;
+		*out_flags |= VX_FF_DEFERRED;
 	}
 
 	return ret;

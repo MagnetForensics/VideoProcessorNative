@@ -55,9 +55,10 @@ typedef enum {
 } vx_error;
 
 typedef enum {
-	VX_FF_KEYFRAME = 1,
-	VX_FF_BYTE_POS_GUESSED = 2,
-	VX_FF_HAS_PTS = 4
+	VX_FF_KEYFRAME			= 1 << 0,
+	VX_FF_BYTE_POS_GUESSED	= 1 << 1,
+	VX_FF_HAS_PTS			= 1 << 2,
+	VX_FF_DEFERRED			= 1 << 3
 } vx_frame_flag;
 
 typedef enum {
