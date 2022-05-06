@@ -46,6 +46,14 @@ struct vx_frame
 	void* buffer;
 };
 
+struct vx_frame_info
+{
+	int width;
+	int height;
+	double timestamp;
+	vx_frame_flag flags;
+};
+
 struct vx_video_options
 {
 	bool autorotate;
@@ -988,7 +996,7 @@ cleanup:
 	return ret;
 }
 
-vx_error vx_frame_step_internal(vx_video* me, double* out_timestamp_seconds, vx_frame_flag* out_flags)
+vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVFrame* frame = NULL;
@@ -1013,29 +1021,33 @@ vx_error vx_frame_step_internal(vx_video* me, double* out_timestamp_seconds, vx_
 	if (ret != VX_ERR_FRAME_DEFERRED && me->num_queue > 0) {
 		frame = vx_get_first_queue_item(me);
 
-		*out_timestamp_seconds = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
-		*out_flags = frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
+		// Have to return the calculated frame dimensions here. The dimensions are
+		// needed before they are actually known, i.e. after filtering
+		frame_info->width = vx_video_is_rotated(*me) ? frame->height : frame->width;
+		frame_info->height = vx_video_is_rotated(*me) ? frame->width : frame->height;
+		frame_info->timestamp = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
+		frame_info->flags = frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
 		if (frame->pkt_pos != -1)
-			*out_flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
-		*out_flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
+			frame_info->flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
+		frame_info->flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
 
 		ret = VX_ERR_SUCCESS;
 	}
 	else if (ret == VX_ERR_FRAME_DEFERRED) {
-		*out_timestamp_seconds = me->last_ts;
-		*out_flags |= VX_FF_DEFERRED;
+		frame_info->timestamp = me->last_ts;
+		frame_info->flags |= VX_FF_DEFERRED;
 	}
 
 	return ret;
 }
 
-vx_error vx_frame_step(vx_video* me, double* out_timestamp_seconds, vx_frame_flag* out_flags)
+vx_error vx_frame_step(vx_video* me, vx_frame_info out_frame_info)
 {
 	vx_error first_error = VX_ERR_SUCCESS;
 
 	for (int i = 0; i < retry_count; i++)
 	{
-		vx_error e = vx_frame_step_internal(me, out_timestamp_seconds, out_flags);
+		vx_error e = vx_frame_step_internal(me, &out_frame_info);
 
 		if (!(e == VX_ERR_UNKNOWN || e == VX_ERR_VIDEO_STREAM || e == VX_ERR_DECODE_VIDEO ||
 			e == VX_ERR_DECODE_AUDIO || e == VX_ERR_NO_AUDIO || e == VX_ERR_RESAMPLE_AUDIO))
