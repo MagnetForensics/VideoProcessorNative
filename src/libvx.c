@@ -724,6 +724,65 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 		: video->last_ts + ts_estimated;
 }
 
+vx_error vx_frame_init_buffer(vx_frame* frame)
+{
+	vx_error result = VX_ERR_ALLOCATE;
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
+
+	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
+	int buffer_size = av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+
+	if (buffer_size <= 0)
+		return result;
+
+	frame->buffer = av_mallocz(buffer_size);
+
+	if (!frame->buffer)
+		return result;
+
+	return VX_ERR_SUCCESS;
+}
+
+vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
+{
+	vx_frame* frame = calloc(1, sizeof(vx_frame));
+
+	if (!frame)
+		goto error;
+
+	frame->width = width;
+	frame->height = height;
+	frame->pix_fmt = pix_fmt;
+
+	if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
+		goto error;
+
+	return frame;
+
+error:
+	if (frame)
+		free(frame);
+
+	return NULL;
+}
+
+void vx_frame_destroy(vx_frame* me)
+{
+	av_free(me->buffer);
+	free(me);
+}
+
+void* vx_frame_get_buffer(vx_frame* frame)
+{
+	return frame->buffer;
+}
+
+int vx_frame_get_buffer_size(const vx_frame* frame)
+{
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
+	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+}
+
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
@@ -1098,6 +1157,18 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		goto cleanup;
 	}
 
+	// The frame may not have been initialized correctly if the
+	// video dimensions have changed since the frame was created
+	if (frame->width <= 0 || frame->height <= 0) {
+		av_free(frame->buffer);
+
+		frame->width = av_frame->width;
+		frame->height = av_frame->height;
+
+		if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
+			goto cleanup;
+	}
+
 	// Fill the buffer
 	if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
@@ -1149,55 +1220,6 @@ vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
 
 	*out_par = (float)av_q2d(par);
 	return VX_ERR_SUCCESS;
-}
-
-vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
-{
-	vx_frame* me = calloc(1, sizeof(vx_frame));
-
-	if (!me)
-		goto error;
-
-	me->width = width;
-	me->height = height;
-	me->pix_fmt = pix_fmt;
-
-	int av_pixfmt = vx_to_av_pix_fmt(pix_fmt);
-	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
-	int size = av_image_get_buffer_size(av_pixfmt, width, height, 1) + FRAME_BUFFER_PADDING;
-
-	if (size <= 0)
-		goto error;
-
-	me->buffer = av_mallocz(size);
-
-	if (!me->buffer)
-		goto error;
-
-	return me;
-
-error:
-	if (me)
-		free(me);
-
-	return NULL;
-}
-
-void vx_frame_destroy(vx_frame* me)
-{
-	av_free(me->buffer);
-	free(me);
-}
-
-void* vx_frame_get_buffer(vx_frame* frame)
-{
-	return frame->buffer;
-}
-
-int vx_frame_get_buffer_size(const vx_frame* frame)
-{
-	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
-	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
 vx_error vx_set_audio_max_samples_per_frame(vx_video* me, int max_samples)
