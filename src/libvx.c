@@ -902,9 +902,6 @@ static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame*
 				goto cleanup;
 			}
 		}
-
-		frame->width = av_frame->width;
-		frame->height = av_frame->height;
 	}
 
 	result = VX_ERR_SUCCESS;
@@ -913,14 +910,14 @@ cleanup:
 	return result;
 }
 
-static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
+static vx_error vx_scale_frame(const AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
-	int av_pixfmt = vx_to_av_pix_fmt(vxframe->pix_fmt);
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
 
 	struct SwsContext* sws_ctx = sws_getContext(
-		frame->width, frame->height, frame->format,
-		vxframe->width, vxframe->height, av_pixfmt,
+		av_frame->width, av_frame->height, av_frame->format,
+		frame->width, frame->height, av_pixfmt,
 		SWS_FAST_BILINEAR, NULL, NULL, NULL);
 
 	if (!sws_ctx) {
@@ -928,14 +925,14 @@ static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
 		goto cleanup;
 	}
 
-	assert(frame->data);
+	assert(av_frame->data);
 
 	int fmtBytesPerPixel[3] = { 3, 1, 4 };
 
-	uint8_t* pixels[3] = { vxframe->buffer, 0, 0 };
-	int pitch[3] = { fmtBytesPerPixel[vxframe->pix_fmt] * vxframe->width, 0, 0 };
+	uint8_t* pixels[3] = { frame->buffer, 0, 0 };
+	int pitch[3] = { fmtBytesPerPixel[frame->pix_fmt] * frame->width, 0, 0 };
 
-	sws_scale(sws_ctx, (const uint8_t* const*)frame->data, frame->linesize, 0, frame->height, pixels, pitch);
+	sws_scale(sws_ctx, (const uint8_t* const*)av_frame->data, av_frame->linesize, 0, av_frame->height, pixels, pitch);
 
 	sws_freeContext(sws_ctx);
 
@@ -1159,7 +1156,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 
 	// The frame may not have been initialized correctly if the
 	// video dimensions have changed since the frame was created
-	if (frame->width <= 0 || frame->height <= 0) {
+	if (frame->width != av_frame->width || frame->height != av_frame->height) {
 		av_free(frame->buffer);
 
 		frame->width = av_frame->width;
