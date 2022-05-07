@@ -1154,8 +1154,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		goto cleanup;
 	}
 
-	// The frame may not have been initialized correctly if the
-	// video dimensions have changed since the frame was created
+	// The frame dimensions may have changed since it was initialized
 	if (frame->width != av_frame->width || frame->height != av_frame->height) {
 		av_free(frame->buffer);
 
