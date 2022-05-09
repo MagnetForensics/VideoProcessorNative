@@ -724,20 +724,20 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 		: video->last_ts + ts_estimated;
 }
 
-vx_error vx_frame_init_buffer(vx_frame** frame)
+vx_error vx_frame_init_buffer(vx_frame* frame)
 {
 	vx_error result = VX_ERR_ALLOCATE;
-	int av_pixfmt = vx_to_av_pix_fmt((*frame)->pix_fmt);
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
 
 	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
-	int buffer_size = av_image_get_buffer_size(av_pixfmt, (*frame)->width, (*frame)->height, 1) + FRAME_BUFFER_PADDING;
+	int buffer_size = av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 
 	if (buffer_size <= 0)
 		return result;
 
-	(*frame)->buffer = av_mallocz(buffer_size);
+	frame->buffer = av_mallocz(buffer_size);
 
-	if (!(*frame)->buffer)
+	if (!frame->buffer)
 		return result;
 
 	return VX_ERR_SUCCESS;
@@ -754,7 +754,7 @@ vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
 	frame->height = height;
 	frame->pix_fmt = pix_fmt;
 
-	if (vx_frame_init_buffer(&frame) != VX_ERR_SUCCESS)
+	if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
 		goto error;
 
 	return frame;
@@ -1161,7 +1161,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		frame->width = av_frame->width;
 		frame->height = av_frame->height;
 
-		if (vx_frame_init_buffer(&frame) != VX_ERR_SUCCESS)
+		if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
