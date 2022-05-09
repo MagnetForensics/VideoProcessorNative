@@ -277,7 +277,7 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 		token = strtok(src, ",");
 
 		while (token) {
-			if ((result = vx_insert_filter(last_filter, pad_index, token, NULL, transform_args)) != VX_ERR_SUCCESS)
+			if (vx_insert_filter(last_filter, pad_index, token, NULL, transform_args) != VX_ERR_SUCCESS)
 				break;
 			token = strtok(NULL, ",");
 		}
@@ -396,14 +396,14 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 		{
 			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i++);
 
-			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-				config->device_type == target_type)
+			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
 				dprintf("found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
 				return config;
 			}
 
-			if (config == NULL) break;
+			if (config == NULL)
+				break;
 		}
 	}
 
@@ -872,7 +872,7 @@ cleanup:
 	return ret;
 }
 
-static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame* av_frame)
+static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
 {
 	vx_error result = VX_ERR_UNKNOWN;
 	int ret = 0;
