@@ -1150,7 +1150,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 
 	// Run the frame through the filter pipeline, if any
-	if (vx_filter_frame(video, frame, av_frame) != VX_ERR_SUCCESS) {
+	if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 
