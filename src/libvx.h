@@ -11,6 +11,7 @@ extern "C" {
 typedef struct vx_video vx_video;
 typedef struct vx_video_options vx_video_options;
 typedef struct vx_frame vx_frame;
+typedef struct vx_frame_info vx_frame_info;
 typedef struct vx_rectangle vx_rectangle;
 
 typedef enum {
@@ -56,9 +57,10 @@ typedef enum {
 } vx_error;
 
 typedef enum {
-	VX_FF_KEYFRAME = 1,
-	VX_FF_BYTE_POS_GUESSED = 2,
-	VX_FF_HAS_PTS = 4
+	VX_FF_KEYFRAME			= 1 << 0,
+	VX_FF_BYTE_POS_GUESSED	= 1 << 1,
+	VX_FF_HAS_PTS			= 1 << 2,
+	VX_FF_DEFERRED			= 1 << 3
 } vx_frame_flag;
 
 typedef enum {
@@ -104,7 +106,7 @@ VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 VX_DECLSPEC vx_frame* VX_CDECL vx_frame_create(int width, int height, vx_pix_fmt pix_fmt);
 VX_DECLSPEC void VX_CDECL vx_frame_destroy(vx_frame* frame);
 
-VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, double* out_timestamp_seconds, vx_frame_flag* flags);
+VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info frame_info);
 VX_DECLSPEC vx_error VX_CDECL vx_frame_transfer_data(const vx_video* video, vx_frame* frame);
 VX_DECLSPEC void* VX_CDECL vx_frame_get_buffer(vx_frame* frame);
 VX_DECLSPEC int VX_CDECL vx_frame_get_buffer_size(const vx_frame* frame);

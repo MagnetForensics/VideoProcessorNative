@@ -54,6 +54,14 @@ struct vx_frame
 	void* buffer;
 };
 
+struct vx_frame_info
+{
+	int width;
+	int height;
+	double timestamp;
+	vx_frame_flag flags;
+};
+
 struct vx_video_options
 {
 	bool autorotate;
@@ -300,7 +308,7 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 		token = strtok(src, ",");
 
 		while (token) {
-			if ((result = vx_insert_filter(last_filter, pad_index, token, NULL, transform_args)) != VX_ERR_SUCCESS)
+			if (vx_insert_filter(last_filter, pad_index, token, NULL, transform_args) != VX_ERR_SUCCESS)
 				break;
 			token = strtok(NULL, ",");
 		}
@@ -423,14 +431,14 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 		{
 			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i++);
 
-			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-				config->device_type == target_type)
+			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
 				dprintf("found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
 				return config;
 			}
 
-			if (config == NULL) break;
+			if (config == NULL)
+				break;
 		}
 	}
 
@@ -751,6 +759,65 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 		: video->last_ts + ts_estimated;
 }
 
+vx_error vx_frame_init_buffer(vx_frame* frame)
+{
+	vx_error result = VX_ERR_ALLOCATE;
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
+
+	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
+	int buffer_size = av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+
+	if (buffer_size <= 0)
+		return result;
+
+	frame->buffer = av_mallocz(buffer_size);
+
+	if (!frame->buffer)
+		return result;
+
+	return VX_ERR_SUCCESS;
+}
+
+vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
+{
+	vx_frame* frame = calloc(1, sizeof(vx_frame));
+
+	if (!frame)
+		goto error;
+
+	frame->width = width;
+	frame->height = height;
+	frame->pix_fmt = pix_fmt;
+
+	if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
+		goto error;
+
+	return frame;
+
+error:
+	if (frame)
+		free(frame);
+
+	return NULL;
+}
+
+void vx_frame_destroy(vx_frame* me)
+{
+	av_free(me->buffer);
+	free(me);
+}
+
+void* vx_frame_get_buffer(vx_frame* frame)
+{
+	return frame->buffer;
+}
+
+int vx_frame_get_buffer_size(const vx_frame* frame)
+{
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
+	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+}
+
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
@@ -840,7 +907,7 @@ cleanup:
 	return ret;
 }
 
-static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame* av_frame)
+static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
 {
 	vx_error result = VX_ERR_UNKNOWN;
 	int ret = 0;
@@ -870,9 +937,6 @@ static vx_error vx_filter_frame(const vx_video* video, vx_frame* frame, AVFrame*
 				goto cleanup;
 			}
 		}
-
-		frame->width = av_frame->width;
-		frame->height = av_frame->height;
 	}
 
 	result = VX_ERR_SUCCESS;
@@ -881,14 +945,14 @@ cleanup:
 	return result;
 }
 
-static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
+static vx_error vx_scale_frame(const AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
-	int av_pixfmt = vx_to_av_pix_fmt(vxframe->pix_fmt);
+	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
 
 	struct SwsContext* sws_ctx = sws_getContext(
-		frame->width, frame->height, frame->format,
-		vxframe->width, vxframe->height, av_pixfmt,
+		av_frame->width, av_frame->height, av_frame->format,
+		frame->width, frame->height, av_pixfmt,
 		SWS_FAST_BILINEAR, NULL, NULL, NULL);
 
 	if (!sws_ctx) {
@@ -896,14 +960,14 @@ static vx_error vx_scale_frame(const AVFrame* frame, vx_frame* vxframe)
 		goto cleanup;
 	}
 
-	assert(frame->data);
+	assert(av_frame->data);
 
 	int fmtBytesPerPixel[3] = { 3, 1, 4 };
 
-	uint8_t* pixels[3] = { vxframe->buffer, 0, 0 };
-	int pitch[3] = { fmtBytesPerPixel[vxframe->pix_fmt] * vxframe->width, 0, 0 };
+	uint8_t* pixels[3] = { frame->buffer, 0, 0 };
+	int pitch[3] = { fmtBytesPerPixel[frame->pix_fmt] * frame->width, 0, 0 };
 
-	sws_scale(sws_ctx, (const uint8_t* const*)frame->data, frame->linesize, 0, frame->height, pixels, pitch);
+	sws_scale(sws_ctx, (const uint8_t* const*)av_frame->data, av_frame->linesize, 0, av_frame->height, pixels, pitch);
 
 	sws_freeContext(sws_ctx);
 
@@ -1023,7 +1087,7 @@ cleanup:
 	return ret;
 }
 
-vx_error vx_frame_step_internal(vx_video* me, double* out_timestamp_seconds, vx_frame_flag* out_flags)
+vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVFrame* frame = NULL;
@@ -1048,28 +1112,33 @@ vx_error vx_frame_step_internal(vx_video* me, double* out_timestamp_seconds, vx_
 	if (ret != VX_ERR_FRAME_DEFERRED && me->num_queue > 0) {
 		frame = vx_get_first_queue_item(me);
 
-		*out_timestamp_seconds = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
-		*out_flags = frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
+		// Have to return the calculated frame dimensions here. The dimensions are
+		// needed before they are actually known, i.e. after filtering
+		frame_info->width = vx_video_is_rotated(*me) ? frame->height : frame->width;
+		frame_info->height = vx_video_is_rotated(*me) ? frame->width : frame->height;
+		frame_info->timestamp = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
+		frame_info->flags = frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
 		if (frame->pkt_pos != -1)
-			*out_flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
-		*out_flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
+			frame_info->flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
+		frame_info->flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
 
 		ret = VX_ERR_SUCCESS;
 	}
 	else if (ret == VX_ERR_FRAME_DEFERRED) {
-		*out_timestamp_seconds = me->last_ts;
+		frame_info->timestamp = me->last_ts;
+		frame_info->flags |= VX_FF_DEFERRED;
 	}
 
 	return ret;
 }
 
-vx_error vx_frame_step(vx_video* me, double* out_timestamp_seconds, vx_frame_flag* out_flags)
+vx_error vx_frame_step(vx_video* me, vx_frame_info out_frame_info)
 {
 	vx_error first_error = VX_ERR_SUCCESS;
 
 	for (int i = 0; i < retry_count; i++)
 	{
-		vx_error e = vx_frame_step_internal(me, out_timestamp_seconds, out_flags);
+		vx_error e = vx_frame_step_internal(me, &out_frame_info);
 
 		if (!(e == VX_ERR_UNKNOWN || e == VX_ERR_VIDEO_STREAM || e == VX_ERR_DECODE_VIDEO ||
 			e == VX_ERR_DECODE_AUDIO || e == VX_ERR_NO_AUDIO || e == VX_ERR_RESAMPLE_AUDIO))
@@ -1116,8 +1185,19 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 
 	// Run the frame through the filter pipeline, if any
-	if (vx_filter_frame(video, frame, av_frame) != VX_ERR_SUCCESS) {
+	if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
+	}
+
+	// The frame dimensions may have changed since it was initialized
+	if (frame->width != av_frame->width || frame->height != av_frame->height) {
+		av_free(frame->buffer);
+
+		frame->width = av_frame->width;
+		frame->height = av_frame->height;
+
+		if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
+			goto cleanup;
 	}
 
 	// Fill the buffer
@@ -1171,55 +1251,6 @@ vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
 
 	*out_par = (float)av_q2d(par);
 	return VX_ERR_SUCCESS;
-}
-
-vx_frame* vx_frame_create(int width, int height, vx_pix_fmt pix_fmt)
-{
-	vx_frame* me = calloc(1, sizeof(vx_frame));
-
-	if (!me)
-		goto error;
-
-	me->width = width;
-	me->height = height;
-	me->pix_fmt = pix_fmt;
-
-	int av_pixfmt = vx_to_av_pix_fmt(pix_fmt);
-	// Includes some padding as a workaround for a bug in swscale (?) where it overreads the buffer
-	int size = av_image_get_buffer_size(av_pixfmt, width, height, 1) + FRAME_BUFFER_PADDING;
-
-	if (size <= 0)
-		goto error;
-
-	me->buffer = av_mallocz(size);
-
-	if (!me->buffer)
-		goto error;
-
-	return me;
-
-error:
-	if (me)
-		free(me);
-
-	return NULL;
-}
-
-void vx_frame_destroy(vx_frame* me)
-{
-	av_free(me->buffer);
-	free(me);
-}
-
-void* vx_frame_get_buffer(vx_frame* frame)
-{
-	return frame->buffer;
-}
-
-int vx_frame_get_buffer_size(const vx_frame* frame)
-{
-	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
-	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
 vx_error vx_set_audio_max_samples_per_frame(vx_video* me, int max_samples)
