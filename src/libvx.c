@@ -37,6 +37,14 @@ static bool initialized = false;
 static int retry_count = 100;
 static vx_log_callback log_cb = NULL;
 
+struct vx_rectangle
+{
+	int x;
+	int y;
+	int width;
+	int height;
+};
+
 struct vx_frame
 {
 	int width;
@@ -57,6 +65,7 @@ struct vx_frame_info
 struct vx_video_options
 {
 	bool autorotate;
+	vx_rectangle crop_area;
 	vx_hwaccel_flag hw_criteria;
 };
 
@@ -179,6 +188,11 @@ static bool vx_is_packet_error(int result)
 	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
 }
 
+static bool vx_rectangle_is_initialized(vx_rectangle rect)
+{
+	return (rect.x + rect.y + rect.width + rect.height) > 0;
+}
+
 static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
 {
 	const AVFrame* frame_a = *(AVFrame**)a;
@@ -251,6 +265,23 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 
 	*last_filter = filter_ctx;
 	*pad_index = 0;
+
+	return VX_ERR_SUCCESS;
+}
+
+static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, const vx_rectangle crop_area)
+{
+	int result = VX_ERR_UNKNOWN;
+	char transform_args[100];
+
+	snprintf(transform_args, sizeof(transform_args),
+		"w=%d:h=%d:x=%d:y=%d:exact=1",
+		crop_area.width, crop_area.height, crop_area.x, crop_area.y);
+
+	if (transform_args) {
+		if ((result = vx_insert_filter(last_filter, pad_index, "crop", NULL, transform_args)) != VX_ERR_SUCCESS)
+			return result;
+	}
 
 	return VX_ERR_SUCCESS;
 }
@@ -333,6 +364,10 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 		if ((result = vx_initialize_rotation_filter(video_stream, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
+	if (vx_rectangle_is_initialized(video->options.crop_area))
+		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
+			goto cleanup;
+
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
@@ -394,7 +429,7 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 
 		for (int i = 0;; i++)
 		{
-			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i++);
+			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
 
 			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
@@ -638,14 +673,63 @@ static bool vx_video_is_rotated(vx_video video)
 		&& (transform_args == "dir=clock" || transform_args == "dir=cclock");
 }
 
-int vx_get_width(const vx_video* me)
+/// <summary>
+/// Attempt to calculate frame dimensions based on cropping and rotation options,
+/// before the actual frame dimensions are known (i.e. after filtering)
+/// </summary>
+vx_error vx_get_adjusted_frame_dimensions(const vx_video* video, int* width, int* height)
 {
-	return vx_video_is_rotated(*me) ? me->video_codec_ctx->height : me->video_codec_ctx->width;
+	if (vx_rectangle_is_initialized(video->options.crop_area)) {
+		*width = video->options.crop_area.width;
+		*height = video->options.crop_area.height;
+	}
+	else if (vx_video_is_rotated(*video)) {
+		int temp = *width;
+		*width = *height;
+		*height = temp;
+	}
+
+	return VX_ERR_SUCCESS;
 }
 
-int vx_get_height(const vx_video* me)
+/// <summary>
+/// The original video width, before cropping but after auto rotation (if enabled)
+/// </summary>
+int vx_get_width(const vx_video* video)
 {
-	return vx_video_is_rotated(*me) ? me->video_codec_ctx->width : me->video_codec_ctx->height;
+	return vx_video_is_rotated(*video) ? video->video_codec_ctx->height : video->video_codec_ctx->width;
+}
+
+/// <summary>
+/// The original video height, before cropping but after auto rotation (if enabled)
+/// </summary>
+int vx_get_height(const vx_video* video)
+{
+	return vx_video_is_rotated(*video) ? video->video_codec_ctx->width : video->video_codec_ctx->height;
+}
+
+/// <summary>
+/// The video width, after cropping and auto rotation (if enabled)
+/// </summary>
+int vx_get_adjusted_width(const vx_video* video)
+{
+	int width = video->video_codec_ctx->width;
+	int height = video->video_codec_ctx->height;
+	vx_get_adjusted_frame_dimensions(video, &width, &height);
+
+	return width;
+}
+
+/// <summary>
+/// The video height, after cropping and auto rotation (if enabled)
+/// </summary>
+int vx_get_adjusted_height(const vx_video* video)
+{
+	int width = video->video_codec_ctx->width;
+	int height = video->video_codec_ctx->height;
+	vx_get_adjusted_frame_dimensions(video, &width, &height);
+
+	return height;
 }
 
 long long vx_get_file_position(const vx_video* video)
@@ -1079,8 +1163,9 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 
 		// Have to return the calculated frame dimensions here. The dimensions are
 		// needed before they are actually known, i.e. after filtering
-		frame_info->width = vx_video_is_rotated(*me) ? frame->height : frame->width;
-		frame_info->height = vx_video_is_rotated(*me) ? frame->width : frame->height;
+		frame_info->width = frame->width;
+		frame_info->height = frame->height;
+		vx_get_adjusted_frame_dimensions(me, &frame_info->width, &frame_info->height);
 		frame_info->timestamp = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
 		frame_info->flags = frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
 		if (frame->pkt_pos != -1)
@@ -1097,13 +1182,13 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	return ret;
 }
 
-vx_error vx_frame_step(vx_video* me, vx_frame_info out_frame_info)
+vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 {
 	vx_error first_error = VX_ERR_SUCCESS;
 
 	for (int i = 0; i < retry_count; i++)
 	{
-		vx_error e = vx_frame_step_internal(me, &out_frame_info);
+		vx_error e = vx_frame_step_internal(me, out_frame_info);
 
 		if (!(e == VX_ERR_UNKNOWN || e == VX_ERR_VIDEO_STREAM || e == VX_ERR_DECODE_VIDEO ||
 			e == VX_ERR_DECODE_AUDIO || e == VX_ERR_NO_AUDIO || e == VX_ERR_RESAMPLE_AUDIO))
