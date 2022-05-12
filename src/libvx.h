@@ -83,6 +83,8 @@ VX_DECLSPEC void VX_CDECL vx_close(vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_height(const vx_video* video);
+VX_DECLSPEC int VX_CDECL vx_get_adjusted_width(const vx_video* video);
+VX_DECLSPEC int VX_CDECL vx_get_adjusted_height(const vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_audio_present(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_audio_sample_rate(const vx_video* video);
