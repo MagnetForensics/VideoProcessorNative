@@ -429,7 +429,7 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 
 		for (int i = 0;; i++)
 		{
-			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i++);
+			const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
 
 			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
