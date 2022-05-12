@@ -108,7 +108,7 @@ VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 VX_DECLSPEC vx_frame* VX_CDECL vx_frame_create(int width, int height, vx_pix_fmt pix_fmt);
 VX_DECLSPEC void VX_CDECL vx_frame_destroy(vx_frame* frame);
 
-VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info frame_info);
+VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info* frame_info);
 VX_DECLSPEC vx_error VX_CDECL vx_frame_transfer_data(const vx_video* video, vx_frame* frame);
 VX_DECLSPEC void* VX_CDECL vx_frame_get_buffer(vx_frame* frame);
 VX_DECLSPEC int VX_CDECL vx_frame_get_buffer_size(const vx_frame* frame);

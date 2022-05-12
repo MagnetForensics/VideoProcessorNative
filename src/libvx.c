@@ -1182,13 +1182,13 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	return ret;
 }
 
-vx_error vx_frame_step(vx_video* me, vx_frame_info out_frame_info)
+vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 {
 	vx_error first_error = VX_ERR_SUCCESS;
 
 	for (int i = 0; i < retry_count; i++)
 	{
-		vx_error e = vx_frame_step_internal(me, &out_frame_info);
+		vx_error e = vx_frame_step_internal(me, out_frame_info);
 
 		if (!(e == VX_ERR_UNKNOWN || e == VX_ERR_VIDEO_STREAM || e == VX_ERR_DECODE_VIDEO ||
 			e == VX_ERR_DECODE_AUDIO || e == VX_ERR_NO_AUDIO || e == VX_ERR_RESAMPLE_AUDIO))
