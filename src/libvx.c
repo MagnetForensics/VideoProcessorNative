@@ -50,6 +50,7 @@ struct vx_frame
 	int width;
 	int height;
 	vx_pix_fmt pix_fmt;
+	double difference;
 
 	void* buffer;
 };
@@ -269,6 +270,21 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 	return VX_ERR_SUCCESS;
 }
 
+static vx_error vx_initialize_scene_filter(AVFilterContext** last_filter, const int* pad_index)
+{
+	int result = VX_ERR_UNKNOWN;
+	char transform_args[100];
+
+	snprintf(transform_args, sizeof(transform_args), "threshold=%d", 10);
+
+	if (transform_args) {
+		if ((result = vx_insert_filter(last_filter, pad_index, "scdet", NULL, transform_args)) != VX_ERR_SUCCESS)
+			return result;
+	}
+
+	return VX_ERR_SUCCESS;
+}
+
 static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, const vx_rectangle crop_area)
 {
 	int result = VX_ERR_UNKNOWN;
@@ -367,6 +383,9 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 	if (vx_rectangle_is_initialized(video->options.crop_area))
 		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
+
+	if ((result = vx_initialize_scene_filter(&last_filter, &pad_index)) != VX_ERR_SUCCESS)
+		goto cleanup;
 
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
@@ -867,6 +886,11 @@ int vx_frame_get_buffer_size(const vx_frame* frame)
 	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
+double vx_frame_get_difference(const vx_frame* frame)
+{
+	return frame->difference;
+}
+
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
@@ -954,6 +978,16 @@ cleanup:
 	av_packet_free(&packet);
 
 	return ret;
+}
+
+static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
+{
+	const AVDictionaryEntry* difference = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
+	if (difference) {
+		frame->difference = atof(difference->value);
+	}
+
+	return VX_ERR_SUCCESS;
 }
 
 static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
@@ -1236,6 +1270,11 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 
 	// Run the frame through the filter pipeline, if any
 	if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
+		goto cleanup;
+	}
+
+	// Update frame properties from metadata
+	if (vx_frame_properties_from_metadata(frame, av_frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 

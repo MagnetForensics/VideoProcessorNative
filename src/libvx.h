@@ -112,6 +112,7 @@ VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info* fram
 VX_DECLSPEC vx_error VX_CDECL vx_frame_transfer_data(const vx_video* video, vx_frame* frame);
 VX_DECLSPEC void* VX_CDECL vx_frame_get_buffer(vx_frame* frame);
 VX_DECLSPEC int VX_CDECL vx_frame_get_buffer_size(const vx_frame* frame);
+VX_DECLSPEC double VX_CDECL vx_frame_get_difference(const vx_frame* frame);
 
 #ifdef __cplusplus
 }
