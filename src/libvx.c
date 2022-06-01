@@ -50,7 +50,7 @@ struct vx_frame
 	int width;
 	int height;
 	vx_pix_fmt pix_fmt;
-	double difference;
+	double scene_score;
 
 	void* buffer;
 };
@@ -888,9 +888,9 @@ int vx_frame_get_buffer_size(const vx_frame* frame)
 	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
-double vx_frame_get_difference(const vx_frame* frame)
+double vx_frame_get_scene_score(const vx_frame* frame)
 {
-	return frame->difference;
+	return frame->scene_score;
 }
 
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
@@ -986,9 +986,9 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 {
 	// Scene score is timestamp is only set if score is above threshold value
 	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
-	const AVDictionaryEntry* difference = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
-	if (timestamp && difference) {
-		frame->difference = atof(difference->value);
+	const AVDictionaryEntry* score = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
+	if (timestamp && score) {
+		frame->scene_score = atof(score->value);
 	}
 
 	return VX_ERR_SUCCESS;
