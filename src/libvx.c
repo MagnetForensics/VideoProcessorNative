@@ -68,6 +68,7 @@ struct vx_video_options
 	bool autorotate;
 	vx_rectangle crop_area;
 	vx_hwaccel_flag hw_criteria;
+	float scene_threshold;
 };
 
 struct vx_video
@@ -270,12 +271,12 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 	return VX_ERR_SUCCESS;
 }
 
-static vx_error vx_initialize_scene_filter(AVFilterContext** last_filter, const int* pad_index)
+static vx_error vx_initialize_scene_filter(AVFilterContext** last_filter, const int* pad_index, const float threshold)
 {
 	int result = VX_ERR_UNKNOWN;
 	char transform_args[100];
 
-	snprintf(transform_args, sizeof(transform_args), "threshold=%d", 10);
+	snprintf(transform_args, sizeof(transform_args), "threshold=%f", threshold);
 
 	if (transform_args) {
 		if ((result = vx_insert_filter(last_filter, pad_index, "scdet", NULL, transform_args)) != VX_ERR_SUCCESS)
@@ -384,8 +385,9 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
-	if ((result = vx_initialize_scene_filter(&last_filter, &pad_index)) != VX_ERR_SUCCESS)
-		goto cleanup;
+	if (video->options.scene_threshold >= 0)
+		if ((result = vx_initialize_scene_filter(&last_filter, &pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
+			goto cleanup;
 
 	if ((result = vx_insert_filter(&last_filter, &pad_index, "buffersink", "out", NULL)) != VX_ERR_SUCCESS)
 		goto cleanup;
@@ -982,8 +984,10 @@ cleanup:
 
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
+	// Scene score is timestamp is only set if score is above threshold value
+	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
 	const AVDictionaryEntry* difference = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
-	if (difference) {
+	if (timestamp && difference) {
 		frame->difference = atof(difference->value);
 	}
 
