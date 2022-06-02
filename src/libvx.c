@@ -987,9 +987,8 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	// Scene score is timestamp is only set if score is above threshold value
 	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
 	const AVDictionaryEntry* score = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
-	if (timestamp && score) {
-		frame->scene_score = atof(score->value);
-	}
+
+	frame->scene_score = timestamp && score ? atof(score->value) : 0;
 
 	return VX_ERR_SUCCESS;
 }
