@@ -392,7 +392,6 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
-	// TODO: Should probably always enable this filter in case frame diff plugin needs it?
 	if (video->options.scene_threshold >= 0)
 		if ((result = vx_initialize_scene_filter(&last_filter, &pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
 			goto cleanup;
