@@ -1290,7 +1290,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		goto cleanup;
 	}
 
-	// Update frame properties from metadata
+	// Frame properties that may have been updated after filtering
 	if (vx_frame_properties_from_metadata(frame, av_frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
