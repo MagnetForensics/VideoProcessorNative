@@ -45,12 +45,19 @@ struct vx_rectangle
 	int height;
 };
 
+struct vx_scene_info
+{
+	double difference;
+	double scene_score;
+	bool new_scene;
+};
+
 struct vx_frame
 {
 	int width;
 	int height;
 	vx_pix_fmt pix_fmt;
-	double scene_score;
+	vx_scene_info scene_info;
 
 	void* buffer;
 };
@@ -385,6 +392,7 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 		if ((result = vx_initialize_crop_filter(&last_filter, &pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
+	// TODO: Should probably always enable this filter in case frame diff plugin needs it?
 	if (video->options.scene_threshold >= 0)
 		if ((result = vx_initialize_scene_filter(&last_filter, &pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
 			goto cleanup;
@@ -888,9 +896,9 @@ int vx_frame_get_buffer_size(const vx_frame* frame)
 	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
-double vx_frame_get_scene_score(const vx_frame* frame)
+vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 {
-	return frame->scene_score;
+	return frame->scene_info;
 }
 
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
@@ -984,11 +992,18 @@ cleanup:
 
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
+	vx_scene_info scene_info = { 0, 0, false };
+
 	// Scene score is timestamp is only set if score is above threshold value
 	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
+	const AVDictionaryEntry* mafd = av_dict_get(av_frame->metadata, "lavfi.scd.mafd", NULL, AV_DICT_MATCH_CASE);
 	const AVDictionaryEntry* score = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
 
-	frame->scene_score = timestamp && score ? atof(score->value) : 0;
+	scene_info.difference = mafd ? atof(mafd->value) : 0;
+	scene_info.scene_score = score ? atof(score->value) : 0;
+	scene_info.new_scene = timestamp != NULL;
+
+	frame->scene_info = scene_info;
 
 	return VX_ERR_SUCCESS;
 }
