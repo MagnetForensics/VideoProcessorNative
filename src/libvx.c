@@ -457,6 +457,11 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 
 	ctx->hw_device_ctx = av_buffer_ref(me->hw_device_ctx);
 
+	// Decoder does not assign sufficient pool size for mpeg2
+	if (ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+		ctx->extra_hw_frames = 16;
+	}
+
 	return err;
 }
 
@@ -485,6 +490,7 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 		*out_error = VX_ERR_ALLOCATE;
 		return false;
 	}
+
 	avcodec_parameters_to_context(codec_ctx, me->fmt_ctx->streams[*out_stream]->codecpar);
 	*out_codec_ctx = codec_ctx;
 
