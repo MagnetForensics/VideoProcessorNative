@@ -870,6 +870,7 @@ int vx_frame_get_buffer_size(const vx_frame* frame)
 static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
+	AVCodecContext* codec_ctx = NULL;
 	AVPacket* packet = NULL;
 	AVFrame* frame = NULL;
 	int frame_count = 0;
@@ -883,10 +884,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
-	if (!vx_read_frame(me->fmt_ctx, packet, me->video_stream)) {
-		ret = VX_ERR_EOF;
-		goto cleanup;
-	}
+	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
 
 	// Only attempt to deocde packets from the two streams that have been selected
 	if (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
@@ -896,11 +894,17 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	*out_stream_idx = packet->stream_index;
-	AVCodecContext* codec_ctx = packet->stream_index == me->video_stream
+	codec_ctx = packet->stream_index == me->video_stream
 		? me->video_codec_ctx
 		: me->audio_codec_ctx;
 
+	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
+	// reached and no packet is returned, it still needs to be sent in order to flush the decoder
 	int result = avcodec_send_packet(codec_ctx, packet);
+	if (result == AVERROR_EOF) {
+		ret = VX_ERR_EOF;
+		goto cleanup;
+	}
 	if (vx_is_packet_error(result)) {
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
@@ -911,12 +915,8 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		frame = av_frame_alloc();
 		result = avcodec_receive_frame(codec_ctx, frame);
 
-		if (result == AVERROR(EAGAIN)) {
+		if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
 			break;
-		}
-		else if (result == AVERROR_EOF) {
-			ret = VX_ERR_EOF;
-			goto cleanup;
 		}
 		else if (result < 0) {
 			ret = VX_ERR_DECODE_VIDEO;
@@ -925,23 +925,11 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		else {
 			out_frame_buffer[frame_count++] = frame;
 		}
-
-		if (packet->data)
-			av_packet_unref(packet);
 	}
-
-	if (frame) {
-		av_frame_unref(frame);
-		av_frame_free(&frame);
-	}
-
-	if (packet && packet->data)
-		av_packet_unref(packet);
-	av_packet_free(&packet);
 
 	*out_frames_count = frame_count;
 
-	return VX_ERR_SUCCESS;
+	ret = VX_ERR_SUCCESS;
 
 cleanup:
 	if (frame) {
