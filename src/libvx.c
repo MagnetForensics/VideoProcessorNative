@@ -887,7 +887,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
 
 	// Only attempt to deocde packets from the two streams that have been selected
-	if (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
+	if (packet->data && packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
 	{
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
