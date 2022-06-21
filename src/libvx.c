@@ -899,10 +899,16 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		goto cleanup;
 	}
 
-	*out_stream_idx = packet->stream_index;
-	codec_ctx = packet->data == NULL || packet->stream_index == me->video_stream
-		? me->video_codec_ctx
-		: me->audio_codec_ctx;
+	if (packet->data) {
+		*out_stream_idx = packet->stream_index;
+		codec_ctx = packet->stream_index == me->video_stream
+			? me->video_codec_ctx
+			: me->audio_codec_ctx;
+	}
+	else {
+		*out_stream_idx = me->video_stream;
+		codec_ctx = me->video_codec_ctx;
+	}
 
 	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
 	// reached and no packet is returned, it still needs to be sent in order to flush the decoder
@@ -934,7 +940,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	*out_frames_count = frame_count;
-
 	ret = VX_ERR_SUCCESS;
 
 cleanup:
@@ -1073,7 +1078,7 @@ vx_error vx_queue_frames(vx_video* me)
 
 		ret = vx_decode_frame(me, &frame_buffer, &frame_count, &stream_idx);
 
-		// Do not immediately exit if frames have been returned
+		// Process any returned frames before returning an error
 		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
 			goto cleanup;
 
