@@ -900,7 +900,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	*out_stream_idx = packet->stream_index;
-	codec_ctx = packet->stream_index == me->video_stream
+	codec_ctx = packet->data == NULL || packet->stream_index == me->video_stream
 		? me->video_codec_ctx
 		: me->audio_codec_ctx;
 
