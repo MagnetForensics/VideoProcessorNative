@@ -1330,6 +1330,10 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 {
 	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
 
+	// Use the estimated rate if the average is not available
+	if (rate.num == 0 || rate.den == 0)
+		rate = video->fmt_ctx->streams[video->video_stream]->r_frame_rate;
+
 	if (rate.num == 0 || rate.den == 0)
 		return VX_ERR_FRAME_RATE;
 
