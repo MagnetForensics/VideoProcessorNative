@@ -560,7 +560,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		return VX_ERR_ALLOCATE;
 
 	me->hw_pix_fmt = AV_PIX_FMT_NONE;
-	me->ts_last = -1;
+	me->ts_last = AV_NOPTS_VALUE;
 	me->ts_offset = AV_NOPTS_VALUE;
 	me->options = options;
 
@@ -816,7 +816,7 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 
 	double ts_estimated = 0.0;
 	double ts_seconds = vx_timestamp_to_seconds_internal(video, stream_type, pts - video->ts_offset);
-	double ts_delta = fabs(ts_seconds - video->ts_last);
+	double ts_delta = ts_seconds - video->ts_last;
 
 	// Not all codecs supply a timestamp, or they supply values that don't progress nicely
 	// So sometimes we need to estimate based on FPS
@@ -1334,10 +1334,6 @@ cleanup:
 vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 {
 	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
-
-	// Use the estimated rate if the average is not available
-	if (rate.num == 0 || rate.den == 0)
-		rate = video->fmt_ctx->streams[video->video_stream]->r_frame_rate;
 
 	if (rate.num == 0 || rate.den == 0)
 		return VX_ERR_FRAME_RATE;
