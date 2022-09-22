@@ -560,7 +560,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		return VX_ERR_ALLOCATE;
 
 	me->hw_pix_fmt = AV_PIX_FMT_NONE;
-	me->ts_last = AV_NOPTS_VALUE;
+	me->ts_last = 0;
 	me->ts_offset = AV_NOPTS_VALUE;
 	me->options = options;
 
