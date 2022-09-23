@@ -116,7 +116,8 @@ struct vx_video
 	AVFrame* frame_queue[FRAME_QUEUE_SIZE + 1];
 
 	vx_video_options options;
-	double last_ts;
+	double ts_last;
+	int64_t ts_offset;
 };
 
 static vx_log_level av_to_vx_log_level(const int level)
@@ -559,7 +560,8 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		return VX_ERR_ALLOCATE;
 
 	me->hw_pix_fmt = AV_PIX_FMT_NONE;
-	me->last_ts = -1;
+	me->ts_last = 0;
+	me->ts_offset = AV_NOPTS_VALUE;
 	me->options = options;
 
 	vx_error error = VX_ERR_UNKNOWN;
@@ -809,16 +811,19 @@ double vx_timestamp_to_seconds(const vx_video* video, const long long ts)
 
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
 {
+	if (video->ts_offset == AV_NOPTS_VALUE)
+		video->ts_offset = pts;
+
 	double ts_estimated = 0.0;
-	double ts_seconds = vx_timestamp_to_seconds_internal(video, stream_type, pts);
-	double ts_delta = ts_seconds - video->last_ts;
+	double ts_seconds = vx_timestamp_to_seconds_internal(video, stream_type, pts - video->ts_offset);
+	double ts_delta = ts_seconds - video->ts_last;
 
 	// Not all codecs supply a timestamp, or they supply values that don't progress nicely
 	// So sometimes we need to estimate based on FPS
 	if (pts == AV_NOPTS_VALUE || ts_delta <= 0 || ts_delta >= 2) {
 		// Initial timestamp should be zero
-		if (video->last_ts < 0 || video->frame_count == 0) {
-			video->last_ts = 0;
+		if (video->ts_last < 0 || video->frame_count == 0) {
+			video->ts_last = 0;
 		}
 		else if (stream_type == video->video_stream) {
 			float fps = 0;
@@ -834,12 +839,12 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 		ts_estimated = ts_delta;
 	}
 	else {
-		video->last_ts = ts_seconds;
+		video->ts_last = ts_seconds;
 	}
 
 	return stream_type == video->video_stream
-		? video->last_ts += ts_estimated
-		: video->last_ts + ts_estimated;
+		? video->ts_last += ts_estimated
+		: video->ts_last + ts_estimated;
 }
 
 vx_error vx_frame_init_buffer(vx_frame* frame)
@@ -1225,7 +1230,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		ret = VX_ERR_SUCCESS;
 	}
 	else if (ret == VX_ERR_FRAME_DEFERRED) {
-		frame_info->timestamp = me->last_ts;
+		frame_info->timestamp = me->ts_last;
 		frame_info->flags |= VX_FF_DEFERRED;
 	}
 
