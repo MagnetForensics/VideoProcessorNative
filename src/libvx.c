@@ -811,7 +811,7 @@ double vx_timestamp_to_seconds(const vx_video* video, const long long ts)
 
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
 {
-	if (video->ts_offset == AV_NOPTS_VALUE)
+	if (video->ts_offset == AV_NOPTS_VALUE && stream_type == video->video_stream)
 		video->ts_offset = pts;
 
 	double ts_estimated = 0.0;
