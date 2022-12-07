@@ -936,7 +936,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		goto cleanup;
 	}
 
-
 	// If the packet is empty then the end of the video has been reached. Howevert the decoder may still hold a couple
 	// of cached frames and needs to be flushed. This is done by sending an empty packet
 	if (!packet->data) {
@@ -987,7 +986,13 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 			goto cleanup;
 		}
 		else {
-			out_frame_buffer[frame_count++] = frame;
+			if (frame_count < 50) {
+				out_frame_buffer[frame_count++] = frame;
+			}
+			else {
+				// Dump the frame and the rest of the packet data to prevent buffer overrun
+				break;
+			}
 		}
 	}
 
