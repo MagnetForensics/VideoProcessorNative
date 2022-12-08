@@ -46,6 +46,11 @@ struct vx_rectangle
 	int height;
 };
 
+struct vx_audio_info
+{
+	double peak_level;
+};
+
 struct vx_scene_info
 {
 	double difference;
@@ -58,9 +63,8 @@ struct vx_frame
 	int width;
 	int height;
 	vx_pix_fmt pix_fmt;
+	vx_audio_info audio_info;
 	vx_scene_info scene_info;
-	double audio_peak;
-	bool has_image;
 
 	void* buffer;
 };
@@ -974,6 +978,11 @@ int vx_frame_get_buffer_size(const vx_frame* frame)
 	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
 }
 
+vx_audio_info vx_frame_get_audio_info(const vx_frame* frame)
+{
+	return frame->audio_info;
+}
+
 vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 {
 	return frame->scene_info;
@@ -1085,19 +1094,23 @@ cleanup:
 
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
+	vx_audio_info audio_info = { 0 };
 	vx_scene_info scene_info = { 0, 0, false };
+
+	const AVDictionaryEntry* audio_peak = av_dict_get(av_frame->metadata, "lavfi.astats.Overall.Max_level", NULL, AV_DICT_MATCH_CASE);
+
+	audio_info.peak_level = audio_peak ? atof(audio_peak->value) : 0;
 
 	// Scene score is timestamp is only set if score is above threshold value
 	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
 	const AVDictionaryEntry* mafd = av_dict_get(av_frame->metadata, "lavfi.scd.mafd", NULL, AV_DICT_MATCH_CASE);
 	const AVDictionaryEntry* score = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
-	const AVDictionaryEntry* audio_peak = av_dict_get(av_frame->metadata, "lavfi.astats.Overall.Max_level", NULL, AV_DICT_MATCH_CASE);
 
 	scene_info.difference = mafd ? atof(mafd->value) : 0;
 	scene_info.scene_score = score ? atof(score->value) : 0;
 	scene_info.new_scene = timestamp != NULL;
 
-	frame->audio_peak = audio_peak ? atof(audio_peak->value) : 0;
+	frame->audio_info = audio_info;
 	frame->scene_info = scene_info;
 
 	return VX_ERR_SUCCESS;

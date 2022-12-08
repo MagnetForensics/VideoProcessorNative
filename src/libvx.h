@@ -11,6 +11,7 @@ extern "C" {
 typedef struct vx_video vx_video;
 typedef struct vx_audio_params vx_audio_params;
 typedef struct vx_video_options vx_video_options;
+typedef struct vx_audio_info vx_audio_info;
 typedef struct vx_scene_info vx_scene_info;
 typedef struct vx_frame vx_frame;
 typedef struct vx_frame_info vx_frame_info;
@@ -113,6 +114,7 @@ VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info* fram
 VX_DECLSPEC vx_error VX_CDECL vx_frame_transfer_data(const vx_video* video, vx_frame* frame);
 VX_DECLSPEC void* VX_CDECL vx_frame_get_buffer(vx_frame* frame);
 VX_DECLSPEC int VX_CDECL vx_frame_get_buffer_size(const vx_frame* frame);
+VX_DECLSPEC vx_audio_info VX_CDECL vx_frame_get_audio_info(const vx_frame* frame);
 VX_DECLSPEC vx_scene_info VX_CDECL vx_frame_get_scene_info(const vx_frame* frame);
 
 #ifdef __cplusplus
