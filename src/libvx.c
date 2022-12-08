@@ -1007,15 +1007,29 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		goto cleanup;
 	}
 
-	if (packet->data) {
+	// If the packet is empty then the end of the video has been reached. Howevert the decoder may still hold a couple
+	// of cached frames and needs to be flushed. This is done by sending an empty packet
+	if (!packet->data) {
+		av_packet_free(&packet);
+
+		if (me->video_codec_ctx) {
+			*out_stream_idx = me->video_stream;
+			codec_ctx = me->video_codec_ctx;
+		}
+		else if (me->audio_codec_ctx) {
+			*out_stream_idx = me->audio_stream;
+			codec_ctx = me->audio_codec_ctx;
+		}
+		else {
+			ret = VX_ERR_EOF;
+			goto cleanup;
+		}
+	}
+	else {
 		*out_stream_idx = packet->stream_index;
 		codec_ctx = packet->stream_index == me->video_stream
 			? me->video_codec_ctx
 			: me->audio_codec_ctx;
-	}
-	else {
-		*out_stream_idx = me->video_stream;
-		codec_ctx = me->video_codec_ctx;
 	}
 
 	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
@@ -1048,8 +1062,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 			}
 			else {
 				// Dump the frame and the rest of the packet data to prevent buffer overrun
-				ret = VX_ERR_SUCCESS;
-				goto cleanup;
+				break;
 			}
 		}
 	}
