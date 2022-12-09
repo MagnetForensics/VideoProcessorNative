@@ -48,6 +48,8 @@ struct vx_rectangle
 
 struct vx_audio_info
 {
+	double max_level;
+	double rms_level;
 	double peak_level;
 };
 
@@ -282,7 +284,7 @@ static vx_error vx_initialize_audio_filter(AVFilterContext** last_filter, const 
 {
 	int result = VX_ERR_UNKNOWN;
 	//char transform_args[] = "measure_perchannel=none:metadata=Max level";
-	char transform_args[] = "metadata=1";
+	char transform_args[] = "metadata=1:reset=1";
 
 	if ((result = vx_insert_filter(last_filter, pad_index, "astats", NULL, transform_args)) != VX_ERR_SUCCESS)
 		return result;
@@ -1092,23 +1094,26 @@ cleanup:
 	return ret;
 }
 
+static double vx_frame_metadata_as_double(const AVFrame* av_frame, const char* key)
+{
+	const AVDictionaryEntry* entry = av_dict_get(av_frame->metadata, key, NULL, AV_DICT_MATCH_CASE);
+
+	return entry ? atof(entry->value) : 0;
+}
+
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
 	vx_audio_info audio_info = { 0 };
 	vx_scene_info scene_info = { 0, 0, false };
 
-	const AVDictionaryEntry* audio_peak = av_dict_get(av_frame->metadata, "lavfi.astats.Overall.Max_level", NULL, AV_DICT_MATCH_CASE);
+	// TODO: 0 is the maximum db level, so a different default should be returned
+	audio_info.max_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Max_level");
+	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level");
+	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level");
 
-	audio_info.peak_level = audio_peak ? atof(audio_peak->value) : 0;
-
-	// Scene score is timestamp is only set if score is above threshold value
-	const AVDictionaryEntry* timestamp = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE);
-	const AVDictionaryEntry* mafd = av_dict_get(av_frame->metadata, "lavfi.scd.mafd", NULL, AV_DICT_MATCH_CASE);
-	const AVDictionaryEntry* score = av_dict_get(av_frame->metadata, "lavfi.scd.score", NULL, AV_DICT_MATCH_CASE);
-
-	scene_info.difference = mafd ? atof(mafd->value) : 0;
-	scene_info.scene_score = score ? atof(score->value) : 0;
-	scene_info.new_scene = timestamp != NULL;
+	scene_info.difference = vx_frame_metadata_as_double(av_frame, "lavfi.scd.mafd");
+	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score");
+	scene_info.new_scene = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE) != NULL;
 
 	frame->audio_info = audio_info;
 	frame->scene_info = scene_info;
