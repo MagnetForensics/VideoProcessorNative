@@ -1340,12 +1340,17 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
 
+		int stream_type = frame->pict_type != AV_PICTURE_TYPE_NONE
+			? me->video_stream
+			: me->audio_stream;
+
 		// Have to return the calculated frame dimensions here. The dimensions are
 		// needed before they are actually known, i.e. after filtering
 		frame_info->width = frame->width;
 		frame_info->height = frame->height;
 		vx_get_adjusted_frame_dimensions(me, &frame_info->width, &frame_info->height);
-		frame_info->timestamp = vx_estimate_timestamp(me, me->video_stream, frame->best_effort_timestamp);
+		// TODO: Handle duplicate audio timestamps
+		frame_info->timestamp = vx_estimate_timestamp(me, stream_type, frame->best_effort_timestamp);
 		frame_info->flags = frame->pict_type != AV_PICTURE_TYPE_NONE ? VX_FF_HAS_IMAGE : 0;
 		frame_info->flags |= frame->nb_samples > 0 ? VX_FF_HAS_AUDIO : 0;
 		frame_info->flags |= frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
