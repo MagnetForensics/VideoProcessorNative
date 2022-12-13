@@ -116,7 +116,7 @@ struct vx_video
 	AVFrame* frame_queue[FRAME_QUEUE_SIZE];
 
 	vx_video_options options;
-	vx_audio_params* audio_params;
+	vx_audio_params audio_params;
 	double ts_last;
 	int64_t ts_offset;
 };
@@ -712,21 +712,21 @@ void vx_close(vx_video* video)
 
 static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream)
 {
-	// try to read a frame, if it can't be read, skip ahead a bit and try again
+	// Try to read a frame, if it can't be read, skip ahead a bit and try again
 	int64_t last_fp = avio_tell(fmt_ctx->pb);
 
 	for (int i = 0; i < 1024; i++) {
 		int ret = av_read_frame(fmt_ctx, packet);
 
-		// success
+		// Success
 		if (ret == 0)
 			return true;
 
-		// eof, no need to retry
+		// End of file, no need to retry
 		if (ret == AVERROR_EOF || avio_feof(fmt_ctx->pb))
 			return false;
 
-		// other error, might be a damaged stream, seek forward a couple bytes and try again
+		// Other error, might be a damaged stream, seek forward a couple bytes and try again
 		if ((i % 10) == 0) {
 			int64_t fp = avio_tell(fmt_ctx->pb);
 
@@ -1007,13 +1007,12 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
+	// TODO: Check for EOF and exit early if possible
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
 
-	// Only attempt to decode packets from the two streams that have been selected
+	// Only attempt to decode packets from the streams that have been selected
 	// and only decode audio if it has been enabled
-	if ((packet->data && packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)
-		|| (packet->stream_index == me->audio_stream && !me->audio_params))
-	{
+	if (packet->data && packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream) {
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
@@ -1052,6 +1051,10 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 	if (vx_is_packet_error(result)) {
 		ret = VX_ERR_DECODE_VIDEO;
+		goto cleanup;
+	}
+	if (packet && packet->stream_index == me->audio_stream && !me->swr_ctx) {
+		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
 
@@ -1286,7 +1289,7 @@ vx_error vx_queue_frames(vx_video* me)
 
 		ret = vx_decode_frame(me, &frame_buffer, &frame_count, &stream_idx);
 
-		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
+		if (ret != VX_ERR_SUCCESS || frame_count <= 0)
 			goto cleanup;
 
 		// The decoder usually only returns a single video frame, but there may be several audio frames
@@ -1535,7 +1538,7 @@ vx_error vx_set_audio_params(vx_video* me, int sample_rate, int channels, vx_sam
 		.sample_rate = ctx->sample_rate,
 		.sample_format = ctx->sample_fmt
 	};
-	me->audio_params = &audio_params;
+	me->audio_params = audio_params;
 
 	if (!me->swr_ctx) {
 		err = VX_ERR_ALLOCATE;
