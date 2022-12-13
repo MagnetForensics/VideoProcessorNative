@@ -1007,7 +1007,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
-	// TODO: Check for EOF and exit early if possible
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
 
 	// Only attempt to decode packets from the streams that have been selected
@@ -1020,8 +1019,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	// If the packet is empty then the end of the video has been reached. Howevert the decoder may still hold a couple
 	// of cached frames and needs to be flushed. This is done by sending an empty packet
 	if (!packet->data) {
-		av_packet_free(&packet);
-
 		if (me->video_codec_ctx) {
 			*out_stream_idx = me->video_stream;
 			codec_ctx = me->video_codec_ctx;
@@ -1053,7 +1050,9 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
 	}
-	if (packet && packet->stream_index == me->audio_stream && !me->swr_ctx) {
+
+	// Don't process audio frames unless audio decoding is enabled
+	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
@@ -1289,7 +1288,7 @@ vx_error vx_queue_frames(vx_video* me)
 
 		ret = vx_decode_frame(me, &frame_buffer, &frame_count, &stream_idx);
 
-		if (ret != VX_ERR_SUCCESS || frame_count <= 0)
+		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
 			goto cleanup;
 
 		// The decoder usually only returns a single video frame, but there may be several audio frames
@@ -1339,7 +1338,6 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	// (Re)fill the frame queue
 	ret = vx_queue_frames(me);
 
-	// Ensure the queue is processed before returning any errors
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
 
@@ -1361,6 +1359,8 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 			frame_info->flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
 		frame_info->flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
 
+		// Override errors that may be returned when queuing frames until
+		// the frame queue is processed
 		ret = VX_ERR_SUCCESS;
 	}
 
