@@ -286,7 +286,7 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 static vx_error vx_initialize_audio_filter(AVFilterContext** last_filter, const int* pad_index)
 {
 	int result = VX_ERR_UNKNOWN;
-	char transform_args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak";
+	char transform_args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak:measure_perchannel=0";
 
 	if ((result = vx_insert_filter(last_filter, pad_index, "astats", NULL, transform_args)) != VX_ERR_SUCCESS)
 		return result;
