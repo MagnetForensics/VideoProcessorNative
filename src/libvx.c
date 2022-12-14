@@ -609,6 +609,13 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 	return true;
 }
 
+static int64_t vx_get_channel_layout(const AVCodecContext* ctx)
+{
+	return ctx->channel_layout != 0
+		? ctx->channel_layout
+		: av_get_default_channel_layout(ctx->channels);
+}
+
 vx_error vx_set_audio_params(vx_video* me, int sample_rate, int channels, vx_sample_fmt format)
 {
 	vx_error err = VX_ERR_UNKNOWN;
@@ -623,10 +630,7 @@ vx_error vx_set_audio_params(vx_video* me, int sample_rate, int channels, vx_sam
 	enum AVSampleFormat avfmt = format == VX_SAMPLE_FMT_FLT
 		? AV_SAMPLE_FMT_FLT
 		: AV_SAMPLE_FMT_S16;
-
-	int64_t src_channel_layout = ctx->channel_layout != 0
-		? ctx->channel_layout
-		: av_get_default_channel_layout(ctx->channels);
+	int64_t src_channel_layout = vx_get_channel_layout(ctx);
 
 	me->swr_ctx = swr_alloc_set_opts(
 		NULL,
@@ -1325,16 +1329,18 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 	}
 
 	vx_audio_params params = video->options.audio_params;
+	int64_t channel_layout = vx_get_channel_layout(video->audio_codec_ctx);
+
 	int dst_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
 	if (params.channels != video->audio_codec_ctx->channels
-		//|| params.channel_layout != video->audio_codec_ctx->channel_layout
+		|| channel_layout != video->audio_codec_ctx->channel_layout
 		|| params.sample_rate != video->audio_codec_ctx->sample_rate
-		|| params.sample_format != video->audio_codec_ctx->sample_fmt)
+		|| (int)params.sample_format != video->audio_codec_ctx->sample_fmt)
 	{
 		dprintf("audio format changed\n");
 		dprintf("channels:       %d -> %d\n", params.channels, video->audio_codec_ctx->channels);
-		//dprintf("channel layout: %08"PRIx64" -> %08"PRIx64"\n", video->swr_channel_layout, video->audio_codec_ctx->channel_layout);
+		dprintf("channel layout: %08"PRIx64" -> %08"PRIx64"\n", channel_layout, video->audio_codec_ctx->channel_layout);
 		dprintf("sample rate:    %d -> %d\n", params.sample_rate, video->audio_codec_ctx->sample_rate);
 		dprintf("sample format:  %d -> %d\n", params.sample_format, video->audio_codec_ctx->sample_fmt);
 
