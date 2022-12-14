@@ -1079,7 +1079,7 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
-static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count, int* out_stream_idx)
+static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVCodecContext* codec_ctx = NULL;
@@ -1087,7 +1087,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	AVFrame* frame = NULL;
 	int frame_count = 0;
 	*out_frames_count = 0;
-	*out_stream_idx = -1;
 
 	packet = av_packet_alloc();
 	if (!packet) {
@@ -1104,27 +1103,19 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		goto cleanup;
 	}
 
-	// If the packet is empty then the end of the video has been reached. Howevert the decoder may still hold a couple
+	// If the packet is empty then the end of the video has been reached. However the decoder may still hold a couple
 	// of cached frames and needs to be flushed. This is done by sending an empty packet
 	if (!packet->data) {
-		if (me->video_codec_ctx) {
-			*out_stream_idx = me->video_stream;
-			codec_ctx = me->video_codec_ctx;
-		}
-		else if (me->audio_codec_ctx) {
-			*out_stream_idx = me->audio_stream;
-			codec_ctx = me->audio_codec_ctx;
-		}
-		else {
-			ret = VX_ERR_EOF;
-			goto cleanup;
-		}
+		codec_ctx = me->video_codec_ctx;
 	}
 	else {
-		*out_stream_idx = packet->stream_index;
 		codec_ctx = packet->stream_index == me->video_stream
 			? me->video_codec_ctx
 			: me->audio_codec_ctx;
+	}
+
+	if (!codec_ctx) {
+		goto cleanup;
 	}
 
 	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
@@ -1136,12 +1127,6 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	}
 	if (vx_is_packet_error(result)) {
 		ret = VX_ERR_DECODE_VIDEO;
-		goto cleanup;
-	}
-
-	// Don't process audio frames unless audio decoding is enabled
-	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
-		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
 
@@ -1370,9 +1355,7 @@ vx_error vx_queue_frames(vx_video* me)
 
 	// Leave some room in the frame queue to buffer the return from the decoder
 	while (ret == VX_ERR_SUCCESS && me->frame_queue_count < FRAME_QUEUE_SIZE / 2) {
-		int stream_idx = -1;
-
-		ret = vx_decode_frame(me, &frame_buffer, &frame_count, &stream_idx);
+		ret = vx_decode_frame(me, &frame_buffer, &frame_count);
 
 		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
 			goto cleanup;
