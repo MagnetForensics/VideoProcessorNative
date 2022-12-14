@@ -443,7 +443,6 @@ static vx_error vx_init_audio_filter_pipeline(vx_video* video)
 	if (video->audio_codec_ctx->channel_layout == 0)
 		video->audio_codec_ctx->channel_layout = av_get_default_channel_layout(video->audio_codec_ctx->channels);
 
-
 	char layout[100];
 	av_get_channel_layout_string(layout, sizeof(layout), video->audio_codec_ctx->channels, video->audio_codec_ctx->channel_layout);
 
@@ -1100,8 +1099,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
 
 	// Only attempt to decode packets from the streams that have been selected
-	// and only decode audio if it has been enabled
-	if (packet->data && packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream) {
+	if (packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
@@ -1477,6 +1475,78 @@ vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 	return first_error;
 }
 
+vx_error vx_frame_transfer_audio_data(const vx_video* video, AVFrame* av_frame, vx_frame* frame)
+{
+	vx_error result = VX_ERR_SUCCESS;
+
+	result = vx_filter_audio_frame(video, av_frame);
+
+	// Fill the audio buffer
+	if (result == VX_ERR_SUCCESS)
+		result = vx_frame_process_audio(video, av_frame, frame);
+
+	return result;
+}
+
+vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, vx_frame* frame)
+{
+	vx_error result = VX_ERR_UNKNOWN;
+	AVFrame* sw_frame = NULL;
+
+	// Copy the frame from GPU memory if it has been hardware decoded
+	bool hw_decoded = av_frame->hw_frames_ctx;
+	if (hw_decoded)
+	{
+		sw_frame = av_frame_alloc();
+
+		if (!sw_frame) {
+			result = VX_ERR_ALLOCATE;
+			goto end;
+		}
+
+		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0)
+		{
+			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
+			av_frame_unref(sw_frame);
+			av_frame_free(&sw_frame);
+
+			goto end;
+		}
+
+		av_frame = sw_frame;
+	}
+
+	if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
+		goto end;
+	}
+
+	// The frame dimensions may have changed since it was initialized
+	if (frame->width != av_frame->width || frame->height != av_frame->height) {
+		av_free(frame->buffer);
+
+		frame->width = av_frame->width;
+		frame->height = av_frame->height;
+
+		if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
+			goto end;
+	}
+
+	// Fill the buffer
+	if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
+		goto end;
+	}
+
+	result = VX_ERR_SUCCESS;
+
+end:
+	if (hw_decoded) {
+		av_frame_unref(av_frame);
+		av_frame_free(&av_frame);
+	}
+
+	return result;
+}
+
 vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
@@ -1490,68 +1560,24 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	if (!av_frame)
 		goto cleanup;
 
-	// Copy the frame from GPU memory if it has been hardware decoded
-	bool hw_decoded = av_frame->pict_type != AV_PICTURE_TYPE_NONE && av_frame->hw_frames_ctx;
-	if (hw_decoded)
-	{
-		AVFrame* sw_frame = av_frame_alloc();
-
-		if (!sw_frame)
-			goto cleanup;
-
-		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0)
-		{
-			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
-			goto cleanup;
-		}
-
-		av_frame = sw_frame;
-	}
-
 	// Run the frame through the filter pipeline, if any
 	if (av_frame->pict_type != AV_PICTURE_TYPE_NONE) {
-		if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
+		if ((ret = vx_frame_transfer_video_data(video, av_frame, frame)) != VX_ERR_SUCCESS) {
 			goto cleanup;
 		}
 	}
 	else if (av_frame->nb_samples > 0) {
-		if (vx_filter_audio_frame(video, av_frame) != VX_ERR_SUCCESS) {
+		if ((ret = vx_frame_transfer_audio_data(video, av_frame, frame)) != VX_ERR_SUCCESS) {
 			goto cleanup;
 		}
+	}
+	else {
+		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data and the buffer could not be transferred.\n");
 	}
 
 	// Frame properties that may have been updated after filtering
 	if (vx_frame_properties_from_metadata(frame, av_frame) != VX_ERR_SUCCESS) {
 		goto cleanup;
-	}
-
-	if (av_frame->pict_type != AV_PICTURE_TYPE_NONE) {
-		// The frame dimensions may have changed since it was initialized
-		if (frame->width != av_frame->width || frame->height != av_frame->height) {
-			av_free(frame->buffer);
-
-			frame->width = av_frame->width;
-			frame->height = av_frame->height;
-
-			if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
-				goto cleanup;
-		}
-
-		// Fill the buffer
-		if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
-			goto cleanup;
-		}
-
-		if (hw_decoded) {
-			av_frame_unref(av_frame);
-			av_frame_free(&av_frame);
-		}
-	}
-	else {
-		// Fill the audio buffer
-		if ((ret = vx_frame_process_audio(video, av_frame, frame)) != VX_ERR_SUCCESS) {
-			goto cleanup;
-		}
 	}
 
 	return VX_ERR_SUCCESS;
