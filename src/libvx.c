@@ -1052,15 +1052,12 @@ void vx_frame_destroy(vx_frame* me)
 	free(me);
 }
 
-void* vx_frame_get_buffer(vx_frame* frame)
-{
-	return frame->buffer;
-}
-
-int vx_frame_get_buffer_size(const vx_frame* frame)
+void* vx_frame_get_video_buffer(vx_frame* frame, int* out_buffer_size)
 {
 	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
-	return av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+	*out_buffer_size = av_image_get_buffer_size(av_pixfmt, frame->width, frame->height, 1) + FRAME_BUFFER_PADDING;
+
+	return frame->buffer;
 }
 
 void* vx_frame_get_audio_buffer(const vx_frame* frame, int* out_sample_count)

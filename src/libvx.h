@@ -110,9 +110,8 @@ VX_DECLSPEC void VX_CDECL vx_frame_destroy(vx_frame* frame);
 
 VX_DECLSPEC vx_error VX_CDECL vx_frame_step(vx_video* video, vx_frame_info* frame_info);
 VX_DECLSPEC vx_error VX_CDECL vx_frame_transfer_data(const vx_video* video, vx_frame* frame);
-VX_DECLSPEC void* VX_CDECL vx_frame_get_buffer(vx_frame* frame);
-VX_DECLSPEC void* VX_CDECL vx_frame_get_audio_buffer(vx_frame* frame);
-VX_DECLSPEC int VX_CDECL vx_frame_get_buffer_size(const vx_frame* frame);
+VX_DECLSPEC void* VX_CDECL vx_frame_get_video_buffer(vx_frame* frame, int* out_buffer_size);
+VX_DECLSPEC void* VX_CDECL vx_frame_get_audio_buffer(vx_frame* frame, int* out_sample_count);
 VX_DECLSPEC vx_audio_info VX_CDECL vx_frame_get_audio_info(const vx_frame* frame);
 VX_DECLSPEC vx_scene_info VX_CDECL vx_frame_get_scene_info(const vx_frame* frame);
 
