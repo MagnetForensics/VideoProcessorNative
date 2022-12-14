@@ -48,9 +48,9 @@ struct vx_rectangle
 
 struct vx_audio_info
 {
-	double max_level;
-	double rms_level;
 	double peak_level;
+	double rms_level;
+	double rms_peak;
 };
 
 struct vx_scene_info
@@ -286,8 +286,7 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 static vx_error vx_initialize_audio_filter(AVFilterContext** last_filter, const int* pad_index)
 {
 	int result = VX_ERR_UNKNOWN;
-	//char transform_args[] = "measure_perchannel=none:metadata=Max level";
-	char transform_args[] = "metadata=1:reset=1";
+	char transform_args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak";
 
 	if ((result = vx_insert_filter(last_filter, pad_index, "astats", NULL, transform_args)) != VX_ERR_SUCCESS)
 		return result;
@@ -1200,9 +1199,9 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	vx_scene_info scene_info = { 0, 0, false };
 
 	// TODO: 0 is the maximum db level, so a different default should be returned
-	audio_info.max_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Max_level");
-	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level");
 	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level");
+	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level");
+	audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak");
 
 	scene_info.difference = vx_frame_metadata_as_double(av_frame, "lavfi.scd.mafd");
 	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score");
