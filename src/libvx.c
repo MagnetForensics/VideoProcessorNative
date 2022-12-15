@@ -1169,24 +1169,32 @@ cleanup:
 	return ret;
 }
 
-static double vx_frame_metadata_as_double(const AVFrame* av_frame, const char* key)
+static double vx_frame_metadata_as_double(const AVFrame* av_frame, const char* key, double defaultValue)
 {
+	double value = defaultValue;
 	const AVDictionaryEntry* entry = av_dict_get(av_frame->metadata, key, NULL, AV_DICT_MATCH_CASE);
 
-	return entry ? atof(entry->value) : 0;
+	if (entry) {
+		sscanf_s(entry->value, "%lf", &value);
+	}
+
+	return value == INFINITY || value == -INFINITY
+		? defaultValue
+		: value;
 }
 
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
 	vx_audio_info audio_info = { 0 };
 	vx_scene_info scene_info = { 0, 0, false };
+	double audio_default = -100;
 
-	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level");
-	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level");
-	audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak");
+	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level", audio_default);
+	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level", audio_default);
+	audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak", audio_default);
 
-	scene_info.difference = vx_frame_metadata_as_double(av_frame, "lavfi.scd.mafd");
-	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score");
+	scene_info.difference = vx_frame_metadata_as_double(av_frame, "lavfi.scd.mafd", 0);
+	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score", 0);
 	scene_info.new_scene = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE) != NULL;
 
 	frame->audio_info = audio_info;
