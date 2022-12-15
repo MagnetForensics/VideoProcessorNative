@@ -95,7 +95,6 @@ VX_DECLSPEC int VX_CDECL vx_get_audio_channels(const vx_video* video);
 
 VX_DECLSPEC long long VX_CDECL vx_get_file_position(const vx_video* video);
 VX_DECLSPEC long long VX_CDECL vx_get_file_size(const vx_video* video);
-VX_DECLSPEC double VX_CDECL vx_timestamp_to_seconds(const vx_video* video, const long long ts);
 
 // Note that you need to re-open the file (create a new vx_video instance) after counting frames.
 VX_DECLSPEC vx_error VX_CDECL vx_count_frames(vx_video* me, int* out_num_frames);

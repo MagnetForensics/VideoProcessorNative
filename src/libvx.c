@@ -79,6 +79,7 @@ struct vx_frame_info
 	int width;
 	int height;
 	double timestamp;
+	double timestamp_original;
 	vx_frame_flag flags;
 };
 
@@ -207,10 +208,15 @@ static bool vx_rectangle_is_initialized(vx_rectangle rect)
 	return (rect.x + rect.y + rect.width + rect.height) > 0;
 }
 
-static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
+static double vx_timestamp_to_seconds(const vx_video* video, const int stream_type, const long long ts)
 {
-	const AVFrame* frame_a = *(AVFrame**)a;
-	const AVFrame* frame_b = *(AVFrame**)b;
+	return (double)ts * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
+}
+
+static int vx_enqueue_qsort_fn_original(const void* a, const void* b)
+{
+	const AVFrame* frame_a = *(const AVFrame**)a;
+	const AVFrame* frame_b = *(const AVFrame**)b;
 
 	return (int)(frame_b->best_effort_timestamp - frame_a->best_effort_timestamp);
 }
@@ -218,7 +224,7 @@ static int vx_enqueue_qsort_fn(AVFrame* a, AVFrame* b)
 static void vx_enqueue(vx_video* video, AVFrame* frame)
 {
 	video->frame_queue[video->frame_queue_count++] = frame;
-	qsort(video->frame_queue, video->frame_queue_count, sizeof(AVFrame*), &vx_enqueue_qsort_fn);
+	qsort(video->frame_queue, video->frame_queue_count, sizeof(AVFrame*), &vx_enqueue_qsort_fn_original);
 }
 
 static AVFrame* vx_dequeue(vx_video* video)
@@ -578,7 +584,6 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 		return false;
 	}
 
-	// Get a pointer to the codec context for the video stream
 	codec_ctx = avcodec_alloc_context3(codec);
 	if (!codec_ctx) {
 		*out_error = VX_ERR_ALLOCATE;
@@ -705,7 +710,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		goto cleanup;
 	}
 
-	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO,&me->audio_stream, &me->audio_codec_ctx, &error)) {
+	if (!find_stream_and_open_codec(me, AVMEDIA_TYPE_AUDIO, &me->audio_stream, &me->audio_codec_ctx, &error)) {
 		if (me->video_codec_ctx->pix_fmt == AV_PIX_FMT_NONE) {
 			// The file doesn't contain video or audio information, but don't exit
 			// as we can still get some useful information out by opening the file
@@ -927,23 +932,13 @@ int vx_get_audio_channels(const vx_video* me)
 	return me->audio_codec_ctx->channels;
 }
 
-static double vx_timestamp_to_seconds_internal(const vx_video* video, const int stream_type, const long long ts)
-{
-	return (double)ts * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
-}
-
-double vx_timestamp_to_seconds(const vx_video* video, const long long ts)
-{
-	return vx_timestamp_to_seconds_internal(video, video->video_stream, ts);
-}
-
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
 {
 	if (video->ts_offset == AV_NOPTS_VALUE && stream_type == video->video_stream)
 		video->ts_offset = pts;
 
 	double ts_estimated = 0.0;
-	double ts_seconds = vx_timestamp_to_seconds_internal(video, stream_type, pts - video->ts_offset);
+	double ts_seconds = vx_timestamp_to_seconds(video, stream_type, pts - video->ts_offset);
 	double ts_delta = ts_seconds - video->ts_last;
 
 	// Not all codecs supply a timestamp, or they supply values that don't progress nicely
@@ -1079,7 +1074,7 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
-static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[50], int* out_frames_count)
+static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frames_count)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVCodecContext* codec_ctx = NULL;
@@ -1130,6 +1125,11 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 		goto cleanup;
 	}
 
+	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
+		ret = VX_ERR_SUCCESS;
+		goto cleanup;
+	}
+
 	// Store all frames returned by the decoder
 	while (result >= 0) {
 		frame = av_frame_alloc();
@@ -1143,7 +1143,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[5
 			goto cleanup;
 		}
 		else {
-			if (frame_count < 50) {
+			if (frame_count < FRAME_QUEUE_SIZE) {
 				out_frame_buffer[frame_count++] = frame;
 			}
 			else {
@@ -1181,7 +1181,6 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	vx_audio_info audio_info = { 0 };
 	vx_scene_info scene_info = { 0, 0, false };
 
-	// TODO: 0 is the maximum db level, so a different default should be returned
 	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level");
 	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level");
 	audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak");
@@ -1414,6 +1413,10 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 			? me->video_stream
 			: me->audio_stream;
 
+		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
+			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
+			: 0;
+
 		// Have to return the calculated frame dimensions here. The dimensions are
 		// needed before they are actually known, i.e. after filtering
 		frame_info->width = frame->width;
@@ -1421,6 +1424,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		vx_get_adjusted_frame_dimensions(me, &frame_info->width, &frame_info->height);
 		// TODO: Handle duplicate audio timestamps
 		frame_info->timestamp = vx_estimate_timestamp(me, stream_type, frame->best_effort_timestamp);
+		frame_info->timestamp_original = ts;
 		frame_info->flags = frame->pict_type != AV_PICTURE_TYPE_NONE ? VX_FF_HAS_IMAGE : 0;
 		frame_info->flags |= frame->nb_samples > 0 ? VX_FF_HAS_AUDIO : 0;
 		frame_info->flags |= frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
@@ -1447,7 +1451,9 @@ vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 		if (!(e == VX_ERR_UNKNOWN || e == VX_ERR_VIDEO_STREAM || e == VX_ERR_DECODE_VIDEO ||
 			e == VX_ERR_DECODE_AUDIO || e == VX_ERR_NO_AUDIO || e == VX_ERR_RESAMPLE_AUDIO))
 		{
-			me->frame_count++;
+			if (out_frame_info->flags & VX_FF_HAS_IMAGE) {
+				me->frame_count++;
+			}
 
 			return e;
 		}
