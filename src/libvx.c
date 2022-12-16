@@ -1074,20 +1074,13 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
-static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frames_count)
+static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frames_count)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVCodecContext* codec_ctx = NULL;
-	AVPacket* packet = NULL;
 	AVFrame* frame = NULL;
 	int frame_count = 0;
 	*out_frames_count = 0;
-
-	packet = av_packet_alloc();
-	if (!packet) {
-		ret = VX_ERR_ALLOCATE;
-		goto cleanup;
-	}
 
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
@@ -1125,6 +1118,7 @@ static vx_error vx_decode_frame(vx_video* me, static AVFrame* out_frame_buffer[F
 		goto cleanup;
 	}
 
+	// Don't decode audio frames unless audio is enabled
 	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
@@ -1161,10 +1155,6 @@ cleanup:
 		av_frame_unref(frame);
 		av_frame_free(&frame);
 	}
-
-	if (packet && packet->data)
-		av_packet_unref(packet);
-	av_packet_free(&packet);
 
 	return ret;
 }
@@ -1351,6 +1341,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 vx_error vx_queue_frames(vx_video* me)
 {
 	vx_error ret = VX_ERR_SUCCESS;
+	AVPacket* packet = NULL;
 	static AVFrame* frame_buffer[50] = { NULL };
 	int frame_idx = 0;
 	int frame_count = 0;
@@ -1360,9 +1351,15 @@ vx_error vx_queue_frames(vx_video* me)
 		return VX_ERR_SUCCESS;
 	}
 
+	packet = av_packet_alloc();
+	if (!packet) {
+		ret = VX_ERR_ALLOCATE;
+		goto cleanup;
+	}
+
 	// Leave some room in the frame queue to buffer the return from the decoder
 	while (ret == VX_ERR_SUCCESS && me->frame_queue_count < FRAME_QUEUE_SIZE / 2) {
-		ret = vx_decode_frame(me, &frame_buffer, &frame_count);
+		ret = vx_decode_frame(me, packet, &frame_buffer, &frame_count);
 
 		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
 			goto cleanup;
@@ -1390,6 +1387,10 @@ cleanup:
 			av_frame_free(&frame);
 		}
 	}
+
+	if (packet && packet->data)
+		av_packet_unref(packet);
+	av_packet_free(&packet);
 
 	return ret;
 }
