@@ -11,7 +11,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
-#include "libavutil/display.h"
+#include <libavutil/display.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/pixfmt.h>
@@ -731,7 +731,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 
 	if (me->audio_codec_ctx) {
 		vx_audio_params params = me->options.audio_params;
-		if (me->options.audio_params.channels > 0) {
+		if (params.channels > 0) {
 			if ((error = vx_set_audio_params(me, params.sample_rate, params.channels, params.sample_format)) != VX_ERR_SUCCESS) {
 				goto cleanup;
 			}
