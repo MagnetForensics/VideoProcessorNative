@@ -180,6 +180,14 @@ static enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
 	return formats[fmt];
 }
 
+static enum AVSampleFormat vx_to_av_sample_fmt(vx_sample_fmt fmt)
+{
+	// Only return packed sample formats, planar formats are not supported in libvx
+	return fmt == VX_SAMPLE_FMT_FLT
+		? AV_SAMPLE_FMT_FLT
+		: AV_SAMPLE_FMT_S16;
+}
+
 static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
 {
 	enum AVPixelFormat format = AV_PIX_FMT_NONE;
@@ -630,17 +638,12 @@ vx_error vx_set_audio_params(vx_video* me, int sample_rate, int channels, vx_sam
 	if (me->swr_ctx)
 		swr_free(&me->swr_ctx);
 
-	enum AVSampleFormat avfmt = format == VX_SAMPLE_FMT_FLT
-		? AV_SAMPLE_FMT_FLT
-		: AV_SAMPLE_FMT_S16;
-	int64_t src_channel_layout = vx_get_channel_layout(ctx);
-
 	me->swr_ctx = swr_alloc_set_opts(
 		NULL,
 		av_get_default_channel_layout(channels),
-		avfmt,
+		vx_to_av_sample_fmt(format),
 		sample_rate,
-		src_channel_layout,
+		vx_get_channel_layout(ctx),
 		ctx->sample_fmt,
 		ctx->sample_rate,
 		0,
@@ -975,12 +978,16 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 	vx_error err = VX_ERR_SUCCESS;
 	int line_size;
 
+	int sample_count = video->audio_codec_ctx->frame_size <= 0
+		? video->options.audio_params.sample_rate
+		: video->audio_codec_ctx->frame_size;
+
 	int ret = av_samples_alloc_array_and_samples(
 		&frame->audio_buffer,
 		&line_size,
 		video->options.audio_params.channels,
-		video->options.audio_params.sample_rate * 4,
-		(int)video->options.audio_params.sample_format,
+		sample_count,
+		vx_to_av_sample_fmt(video->options.audio_params.sample_format),
 		0);
 
 	if (ret < 0) {
@@ -1327,9 +1334,9 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		vx_set_audio_params(video, params.sample_rate, params.channels, params.sample_format);
 	}
 
-	int swrret = swr_convert(video->swr_ctx, frame->audio_buffer, dst_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
+	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, dst_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
 
-	if (swrret < 0) {
+	if (sample_count < 0) {
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
