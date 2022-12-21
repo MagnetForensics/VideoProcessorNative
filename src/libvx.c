@@ -90,6 +90,14 @@ struct vx_audio_params
 	int sample_rate;
 };
 
+struct av_audio_params
+{
+	int channels;
+	int64_t channel_layout;
+	int sample_format;
+	int sample_rate;
+};
+
 struct vx_video_options
 {
 	vx_audio_params audio_params;
@@ -108,6 +116,7 @@ struct vx_video
 	SwrContext* swr_ctx;
 
 	enum AVPixelFormat hw_pix_fmt;
+	struct av_audio_params inital_audio_params;
 
 	AVFilterGraph* filter_pipeline;
 	AVFilterGraph* filter_pipeline_audio;
@@ -653,6 +662,11 @@ vx_error vx_set_audio_params(vx_video* me, int sample_rate, int channels, vx_sam
 		err = VX_ERR_ALLOCATE;
 		goto cleanup;
 	}
+
+	me->inital_audio_params.channels = ctx->channels;
+	me->inital_audio_params.channel_layout = ctx->channel_layout;
+	me->inital_audio_params.sample_format = (int)ctx->sample_fmt;
+	me->inital_audio_params.sample_rate = ctx->sample_rate;
 
 	swr_init(me->swr_ctx);
 
@@ -1314,24 +1328,25 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_DECODE_AUDIO;
 	}
 
-	vx_audio_params params = video->options.audio_params;
-	int64_t channel_layout = vx_get_channel_layout(video->audio_codec_ctx);
+	struct av_audio_params initial_params = video->inital_audio_params;
+	vx_audio_params out_params = video->options.audio_params;
+	const AVCodecContext* audio_context = video->audio_codec_ctx;
 
-	int dst_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
+	int dst_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, audio_context->sample_rate, AV_ROUND_UP);
 
-	if (params.channels != video->audio_codec_ctx->channels
-		|| channel_layout != video->audio_codec_ctx->channel_layout
-		|| params.sample_rate != video->audio_codec_ctx->sample_rate
-		|| (int)params.sample_format != video->audio_codec_ctx->sample_fmt)
+	if (initial_params.channels != audio_context->channels
+		|| initial_params.channel_layout != audio_context->channel_layout
+		|| initial_params.sample_rate != audio_context->sample_rate
+		|| initial_params.sample_format != (int)audio_context->sample_fmt)
 	{
 		dprintf("audio format changed\n");
-		dprintf("channels:       %d -> %d\n", params.channels, video->audio_codec_ctx->channels);
-		dprintf("channel layout: %08"PRIx64" -> %08"PRIx64"\n", channel_layout, video->audio_codec_ctx->channel_layout);
-		dprintf("sample rate:    %d -> %d\n", params.sample_rate, video->audio_codec_ctx->sample_rate);
-		dprintf("sample format:  %d -> %d\n", params.sample_format, video->audio_codec_ctx->sample_fmt);
+		dprintf("channels:       %d -> %d\n", initial_params.channels, audio_context->channels);
+		dprintf("channel layout: %08"PRIx64" -> %08"PRIx64"\n", initial_params.channel_layout, audio_context->channel_layout);
+		dprintf("sample rate:    %d -> %d\n", initial_params.sample_rate, audio_context->sample_rate);
+		dprintf("sample format:  %d -> %d\n", initial_params.sample_format, audio_context->sample_fmt);
 
 		// Reinitialize swr_ctx if the audio codec magically changed parameters
-		vx_set_audio_params(video, params.sample_rate, params.channels, params.sample_format);
+		vx_set_audio_params(video, out_params.sample_rate, out_params.channels, out_params.sample_format);
 	}
 
 	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, dst_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
