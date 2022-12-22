@@ -1237,7 +1237,6 @@ static double vx_frame_metadata_as_double(const AVFrame* av_frame, const char* k
 
 static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame* av_frame)
 {
-	vx_audio_info audio_info = { 0 };
 	vx_scene_info scene_info = { 0, 0, false };
 	double audio_default = -100;
 
@@ -1249,7 +1248,6 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score", 0);
 	scene_info.new_scene = av_dict_get(av_frame->metadata, "lavfi.scd.time", NULL, AV_DICT_MATCH_CASE) != NULL;
 
-	frame->audio_info = audio_info;
 	frame->scene_info = scene_info;
 
 	return VX_ERR_SUCCESS;
