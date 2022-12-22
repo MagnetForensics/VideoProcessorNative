@@ -18,6 +18,8 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 
+#include "whisper.h"
+
 #include "libvx.h"
 
 #ifdef __cplusplus
@@ -51,6 +53,7 @@ struct vx_audio_info
 	double peak_level;
 	double rms_level;
 	double rms_peak;
+	char* transcription;
 };
 
 struct vx_scene_info
@@ -88,6 +91,7 @@ struct vx_audio_params
 	int channels;
 	vx_sample_fmt sample_format;
 	int sample_rate;
+	bool transcribe;
 };
 
 struct av_audio_params
@@ -113,7 +117,11 @@ struct vx_video
 	AVCodecContext* video_codec_ctx;
 	AVCodecContext* audio_codec_ctx;
 	AVBufferRef* hw_device_ctx;
+
 	SwrContext* swr_ctx;
+	struct whisper_context* whisper_ctx;
+	uint8_t** audio_buffer;
+	int sample_count;
 
 	enum AVPixelFormat hw_pix_fmt;
 	struct av_audio_params inital_audio_params;
@@ -744,7 +752,22 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->audio_codec_ctx) {
+		// Whisper sample requirements
+		me->options.audio_params.sample_rate = 16000;
+		me->options.audio_params.sample_format = VX_SAMPLE_FMT_FLT;
+		me->options.audio_params.channels = 1;
+
+		int line_size;
+		int ret = av_samples_alloc_array_and_samples(
+			&me->audio_buffer,
+			&line_size,
+			me->options.audio_params.channels,
+			me->options.audio_params.sample_rate * 4,
+			AV_SAMPLE_FMT_FLT,
+			0);
+
 		vx_audio_params params = me->options.audio_params;
+
 		if (params.channels > 0) {
 			if ((error = vx_set_audio_params(me, params.sample_rate, params.channels, params.sample_format)) != VX_ERR_SUCCESS) {
 				goto cleanup;
@@ -753,6 +776,9 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 
 		if ((error = vx_init_audio_filter_pipeline(me)) != VX_ERR_SUCCESS)
 			goto cleanup;
+
+		if (params.transcribe)
+			me->whisper_ctx = whisper_init("ggml-model-whisper-base.en.bin");
 	}
 
 	*video = me;
@@ -774,6 +800,10 @@ void vx_close(vx_video* video)
 
 	if (video->swr_ctx)
 		swr_free(&video->swr_ctx);
+
+	if (video->whisper_ctx) {
+		whisper_free(video->whisper_ctx);
+	}
 
 	if (video->fmt_ctx)
 		avformat_free_context(video->fmt_ctx);
@@ -1008,6 +1038,13 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 		err = VX_ERR_ALLOCATE;
 	}
 
+	frame->audio_info.transcription = malloc((2048 + 1) * sizeof(char));
+	if (!frame->audio_info.transcription) {
+		return VX_ERR_ALLOCATE;
+	}
+
+	frame->audio_info.transcription[0] = '\0';
+
 	return err;
 }
 
@@ -1065,6 +1102,10 @@ void vx_frame_destroy(vx_frame* me)
 	if (me->audio_buffer) {
 		av_freep(&me->audio_buffer[0]);
 		av_freep(&me->audio_buffer);
+	}
+
+	if (me->audio_info.transcription) {
+		free(me->audio_info.transcription);
 	}
 
 	free(me);
@@ -1200,9 +1241,9 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	vx_scene_info scene_info = { 0, 0, false };
 	double audio_default = -100;
 
-	audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level", audio_default);
-	audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level", audio_default);
-	audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak", audio_default);
+	frame->audio_info.peak_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.Peak_level", audio_default);
+	frame->audio_info.rms_level = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_level", audio_default);
+	frame->audio_info.rms_peak = vx_frame_metadata_as_double(av_frame, "lavfi.astats.Overall.RMS_peak", audio_default);
 
 	scene_info.difference = vx_frame_metadata_as_double(av_frame, "lavfi.scd.mafd", 0);
 	scene_info.scene_score = vx_frame_metadata_as_double(av_frame, "lavfi.scd.score", 0);
@@ -1495,7 +1536,24 @@ vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 	return first_error;
 }
 
-vx_error vx_frame_transfer_audio_data(const vx_video* video, AVFrame* av_frame, vx_frame* frame)
+//  500 -> 00:05.000
+// 6000 -> 01:00.000
+char* to_timestamp(int64_t t) {
+	int64_t msec = t * 10;
+	int64_t hr = msec / (1000 * 60 * 60);
+	msec = msec - hr * (1000 * 60 * 60);
+	int64_t min = msec / (1000 * 60);
+	msec = msec - min * (1000 * 60);
+	int64_t sec = msec / 1000;
+	msec = msec - sec * 1000;
+
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%02d:%02d:%02d%s%03d", (int)hr, (int)min, (int)sec, ".", (int)msec);
+
+	return buf;
+}
+
+vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error result = VX_ERR_SUCCESS;
 
@@ -1504,6 +1562,52 @@ vx_error vx_frame_transfer_audio_data(const vx_video* video, AVFrame* av_frame, 
 	// Fill the audio buffer
 	if (result == VX_ERR_SUCCESS)
 		result = vx_frame_process_audio(video, av_frame, frame);
+	if (video->options.audio_params.transcribe) {
+		enum AVSampleFormat avfmt = video->options.audio_params.sample_format == VX_SAMPLE_FMT_FLT
+			? AV_SAMPLE_FMT_FLT
+			: AV_SAMPLE_FMT_S16;
+		if (video->sample_count < video->options.audio_params.sample_rate * 2) {
+			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, avfmt);
+			video->sample_count += frame->audio_sample_count;
+			frame->audio_info.transcription[0] = '\0';
+		}
+		else {
+			// Transcribe audio
+			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+			params.language = "en";
+			params.n_threads = 8;
+			params.duration_ms = 0; // Use all the provided samples
+			params.no_context = true;
+			params.max_tokens = 32;
+			params.audio_ctx = 0;
+			params.speed_up = true;
+
+			char* sys_info = whisper_print_system_info();
+			printf("%s", sys_info);
+
+			// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
+			// In this case, linesize is the buffer size, in bytes, for the 1 plane
+			int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], video->sample_count);
+
+			const int n_segments = whisper_full_n_segments(video->whisper_ctx);
+			for (int i = 0; i < n_segments; i++) {
+				if (!params.token_timestamps) {
+					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+					strcat(frame->audio_info.transcription, text);
+				}
+				else {
+					const int64_t t0 = whisper_full_get_segment_t0(video->whisper_ctx, i);
+					const int64_t t1 = whisper_full_get_segment_t1(video->whisper_ctx, i);
+					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+
+					printf("[%s --> %s]  %s\n", to_timestamp(t0), to_timestamp(t1), text);
+				}
+			}
+
+			video->sample_count = 0;
+			av_samples_set_silence(video->audio_buffer, 0, video->options.audio_params.sample_rate * 4, video->options.audio_params.channels, avfmt);
+		}
+	}
 
 	return result;
 }
