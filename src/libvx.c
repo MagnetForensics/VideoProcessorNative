@@ -1573,10 +1573,6 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.language = "en";
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
-			params.no_context = true;
-			params.max_tokens = 32;
-			params.audio_ctx = 0;
-			params.speed_up = true;
 
 			char* sys_info = whisper_print_system_info();
 			printf("%s", sys_info);
