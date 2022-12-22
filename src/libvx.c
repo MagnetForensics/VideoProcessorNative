@@ -751,7 +751,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			goto cleanup;
 	}
 
-	if (me->audio_codec_ctx) {
+	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
 		// Whisper sample requirements
 		me->options.audio_params.sample_rate = 16000;
 		me->options.audio_params.sample_format = VX_SAMPLE_FMT_FLT;
@@ -768,10 +768,8 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 
 		vx_audio_params params = me->options.audio_params;
 
-		if (params.channels > 0) {
-			if ((error = vx_set_audio_params(me, params.sample_rate, params.channels, params.sample_format)) != VX_ERR_SUCCESS) {
-				goto cleanup;
-			}
+		if ((error = vx_set_audio_params(me, params.sample_rate, params.channels, params.sample_format)) != VX_ERR_SUCCESS) {
+			goto cleanup;
 		}
 
 		if ((error = vx_init_audio_filter_pipeline(me)) != VX_ERR_SUCCESS)
