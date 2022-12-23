@@ -1578,6 +1578,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 			params.language = "en";
+			params.print_progress = false;
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
 			params.no_context = true;
@@ -1617,10 +1618,11 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
 			video->transcription_hints_count = 0;
 
-			for (int i = 0; i < n_segments; ++i) {
-				const int token_count = whisper_full_n_tokens(video->whisper_ctx, i);
+			if (n_segments > 0) {
+				int last_segment = n_segments - 1;
+				const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
 				for (int j = 0; j < token_count; ++j) {
-					video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, i, j));
+					video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
 					video->transcription_hints_count++;
 				}
 			}
