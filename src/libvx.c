@@ -762,7 +762,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			&me->audio_buffer,
 			&line_size,
 			me->options.audio_params.channels,
-			me->options.audio_params.sample_rate * 4,
+			me->options.audio_params.sample_rate * 8,
 			AV_SAMPLE_FMT_FLT,
 			0);
 
@@ -1566,7 +1566,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		enum AVSampleFormat avfmt = video->options.audio_params.sample_format == VX_SAMPLE_FMT_FLT
 			? AV_SAMPLE_FMT_FLT
 			: AV_SAMPLE_FMT_S16;
-		if (video->sample_count < video->options.audio_params.sample_rate * 2) {
+		if (video->sample_count < video->options.audio_params.sample_rate * 4) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, avfmt);
 			video->sample_count += frame->audio_sample_count;
 			frame->audio_info.transcription[0] = '\0';
