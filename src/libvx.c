@@ -1563,11 +1563,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 	if (result == VX_ERR_SUCCESS)
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
-		enum AVSampleFormat avfmt = video->options.audio_params.sample_format == VX_SAMPLE_FMT_FLT
-			? AV_SAMPLE_FMT_FLT
-			: AV_SAMPLE_FMT_S16;
+		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
 		if (video->sample_count < video->options.audio_params.sample_rate * 4) {
-			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, avfmt);
+			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
 			frame->audio_info.transcription[0] = '\0';
 		}
@@ -1604,8 +1602,8 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			int keep_ms = 200;
 			int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
 
-			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, avfmt);
-			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * 4) - keep_samples, video->options.audio_params.channels, avfmt);
+			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
+			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * 8) - keep_samples, video->options.audio_params.channels, sample_format);
 			video->sample_count = keep_samples;
 		}
 	}
