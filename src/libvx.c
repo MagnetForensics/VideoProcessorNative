@@ -32,6 +32,7 @@
 #define dprintf(...)
 #endif
 
+#define AUDIO_BUFFER_SECONDS 8
 #define FRAME_QUEUE_SIZE 32
 #define FRAME_BUFFER_PADDING 4096
 #define LOG_TRACE_BUFSIZE 4096
@@ -762,7 +763,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			&me->audio_buffer,
 			&line_size,
 			me->options.audio_params.channels,
-			me->options.audio_params.sample_rate * 8,
+			me->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS,
 			AV_SAMPLE_FMT_FLT,
 			0);
 
@@ -1564,7 +1565,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
-		if (video->sample_count < video->options.audio_params.sample_rate * 4) {
+		if (video->sample_count < video->options.audio_params.sample_rate * (AUDIO_BUFFER_SECONDS / 2)) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
 			frame->audio_info.transcription[0] = '\0';
@@ -1603,7 +1604,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
 
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
-			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * 8) - keep_samples, video->options.audio_params.channels, sample_format);
+			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - keep_samples, video->options.audio_params.channels, sample_format);
 			video->sample_count = keep_samples;
 		}
 	}
