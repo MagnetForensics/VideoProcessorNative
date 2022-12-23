@@ -123,6 +123,8 @@ struct vx_video
 	struct whisper_context* whisper_ctx;
 	uint8_t** audio_buffer;
 	int sample_count;
+	whisper_token transcription_hints[32];
+	int transcription_hints_count;
 
 	enum AVPixelFormat hw_pix_fmt;
 	struct av_audio_params inital_audio_params;
@@ -1571,6 +1573,8 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			frame->audio_info.transcription[0] = '\0';
 		}
 		else {
+			assert(video->transcription_hints_count <= 32);
+
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 			params.language = "en";
@@ -1578,6 +1582,8 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.duration_ms = 0; // Use all the provided samples
 			params.no_context = true;
 			params.max_tokens = 32;
+			params.prompt_tokens = video->transcription_hints;
+			params.prompt_n_tokens = video->transcription_hints_count;
 			params.audio_ctx = 0;
 
 			// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
@@ -1599,13 +1605,25 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 				}
 			}
 
-			// Keep the last few samples to help with audio cutoff between transcription
-			int keep_ms = 500;
+			// Keep the last few samples to mitigate word boundary issues
+			int keep_ms = 200;
 			int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
 
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
 			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - keep_samples, video->options.audio_params.channels, sample_format);
 			video->sample_count = keep_samples;
+
+			// Add tokens of the last full length segment as the prompt
+			memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
+			video->transcription_hints_count = 0;
+
+			for (int i = 0; i < n_segments; ++i) {
+				const int token_count = whisper_full_n_tokens(video->whisper_ctx, i);
+				for (int j = 0; j < token_count; ++j) {
+					video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, i, j));
+					video->transcription_hints_count++;
+				}
+			}
 		}
 	}
 
