@@ -126,7 +126,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/w34996 %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -144,7 +144,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>/w34996 %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -166,13 +166,13 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\ffmpeg-lgpl.4.4.3\build\native\ffmpeg-lgpl.targets" Condition="Exists('..\packages\ffmpeg-lgpl.4.4.3\build\native\ffmpeg-lgpl.targets')" />
-    <Import Project="..\packages\whisper.1.0.4\build\native\whisper.targets" Condition="Exists('..\packages\whisper.1.0.4\build\native\whisper.targets')" />
+    <Import Project="..\packages\whisper.1.0.4.1\build\native\whisper.targets" Condition="Exists('..\packages\whisper.1.0.4.1\build\native\whisper.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\ffmpeg-lgpl.4.4.3\build\native\ffmpeg-lgpl.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\ffmpeg-lgpl.4.4.3\build\native\ffmpeg-lgpl.targets'))" />
-    <Error Condition="!Exists('..\packages\whisper.1.0.4\build\native\whisper.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\whisper.1.0.4\build\native\whisper.targets'))" />
+    <Error Condition="!Exists('..\packages\whisper.1.0.4.1\build\native\whisper.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\whisper.1.0.4.1\build\native\whisper.targets'))" />
   </Target>
 </Project>

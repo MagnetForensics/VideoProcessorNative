@@ -775,8 +775,12 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		if ((error = vx_init_audio_filter_pipeline(me)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
-		if (params.transcribe)
+		if (params.transcribe) {
 			me->whisper_ctx = whisper_init("ggml-model-whisper-base.en.bin");
+
+			char* sys_info = whisper_print_system_info();
+			printf("%s", sys_info);
+		}
 	}
 
 	*video = me;
@@ -1576,9 +1580,6 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.no_context = true;
 			params.max_tokens = 32;
 			params.audio_ctx = 0;
-
-			char* sys_info = whisper_print_system_info();
-			printf("%s", sys_info);
 
 			// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
 			// In this case, linesize is the buffer size, in bytes, for the 1 plane
