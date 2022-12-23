@@ -1600,8 +1600,13 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 				}
 			}
 
-			video->sample_count = 0;
-			av_samples_set_silence(video->audio_buffer, 0, video->options.audio_params.sample_rate * 4, video->options.audio_params.channels, avfmt);
+			// Keep the last few samples to help with audio cutoff between transcription
+			int keep_ms = 200;
+			int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
+
+			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, avfmt);
+			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * 4) - keep_samples, video->options.audio_params.channels, avfmt);
+			video->sample_count = keep_samples;
 		}
 	}
 
