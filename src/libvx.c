@@ -1591,39 +1591,41 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			// In this case, linesize is the buffer size, in bytes, for the 1 plane
 			int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], video->sample_count);
 
-			const int n_segments = whisper_full_n_segments(video->whisper_ctx);
-			for (int i = 0; i < n_segments; i++) {
-				if (!params.token_timestamps) {
-					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
-					strcat(frame->audio_info.transcription, text);
+			if (whisper_result == 0) {
+				const int n_segments = whisper_full_n_segments(video->whisper_ctx);
+				for (int i = 0; i < n_segments; i++) {
+					if (!params.token_timestamps) {
+						const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+						strcat(frame->audio_info.transcription, text);
+					}
+					else {
+						const int64_t t0 = whisper_full_get_segment_t0(video->whisper_ctx, i);
+						const int64_t t1 = whisper_full_get_segment_t1(video->whisper_ctx, i);
+						const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+
+						printf("[%s --> %s]  %s\n", to_timestamp(t0), to_timestamp(t1), text);
+					}
 				}
-				else {
-					const int64_t t0 = whisper_full_get_segment_t0(video->whisper_ctx, i);
-					const int64_t t1 = whisper_full_get_segment_t1(video->whisper_ctx, i);
-					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
 
-					printf("[%s --> %s]  %s\n", to_timestamp(t0), to_timestamp(t1), text);
-				}
-			}
+				// Keep the last few samples to mitigate word boundary issues
+				int keep_ms = 200;
+				int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
 
-			// Keep the last few samples to mitigate word boundary issues
-			int keep_ms = 200;
-			int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
+				av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
+				av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - keep_samples, video->options.audio_params.channels, sample_format);
+				video->sample_count = keep_samples;
 
-			av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
-			av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - keep_samples, video->options.audio_params.channels, sample_format);
-			video->sample_count = keep_samples;
+				// Add tokens of the last full length segment as the prompt
+				memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
+				video->transcription_hints_count = 0;
 
-			// Add tokens of the last full length segment as the prompt
-			memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
-			video->transcription_hints_count = 0;
-
-			if (n_segments > 0) {
-				int last_segment = n_segments - 1;
-				const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
-				for (int j = 0; j < token_count; ++j) {
-					video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
-					video->transcription_hints_count++;
+				if (n_segments > 0) {
+					int last_segment = n_segments - 1;
+					const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
+					for (int j = 0; j < token_count; ++j) {
+						video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
+						video->transcription_hints_count++;
+					}
 				}
 			}
 		}
