@@ -1567,14 +1567,14 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
+		float test = AUDIO_BUFFER_SECONDS * 0.75;
+		float test1 =  video->options.audio_params.sample_rate* (AUDIO_BUFFER_SECONDS * 0.75);
 		if (video->sample_count < video->options.audio_params.sample_rate * (AUDIO_BUFFER_SECONDS * 0.75)) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
 			frame->audio_info.transcription[0] = '\0';
 		}
 		else {
-			assert(video->transcription_hints_count <= 32);
-
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 			params.language = "en";
@@ -1622,7 +1622,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 				if (n_segments > 0) {
 					int last_segment = n_segments - 1;
 					const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
-					for (int j = 0; j < token_count; ++j) {
+					for (int j = 0; j < min(token_count, params.max_tokens); ++j) {
 						video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
 						video->transcription_hints_count++;
 					}
