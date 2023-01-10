@@ -1082,7 +1082,9 @@ void* vx_frame_get_audio_buffer(const vx_frame* frame, int* out_sample_count)
 {
 	*out_sample_count = frame->audio_sample_count;
 
-	return frame->audio_buffer[0];
+	return frame->audio_buffer
+		? frame->audio_buffer[0]
+		: NULL;
 }
 
 vx_audio_info vx_frame_get_audio_info(const vx_frame* frame)
@@ -1440,9 +1442,9 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
 
-		int stream_type = frame->pict_type != AV_PICTURE_TYPE_NONE
-			? me->video_stream
-			: me->audio_stream;
+		int stream_type = frame->pict_type == AV_PICTURE_TYPE_NONE && frame->nb_samples > 0
+			? me->audio_stream
+			: me->video_stream;
 
 		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
 			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
