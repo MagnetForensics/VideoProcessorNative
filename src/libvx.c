@@ -993,7 +993,7 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 	int line_size;
 
 	int sample_count = video->audio_codec_ctx->frame_size <= 0
-		? video->options.audio_params.sample_rate
+		? video->options.audio_params.sample_rate * 4
 		: video->audio_codec_ctx->frame_size;
 
 	int ret = av_samples_alloc_array_and_samples(
