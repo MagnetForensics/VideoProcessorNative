@@ -630,7 +630,7 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
-	if (type == AVMEDIA_TYPE_AUDIO)
+	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
 		(*out_codec_ctx)->max_samples = min(10000, me->options.audio_params.sample_rate);
 
 	return true;
