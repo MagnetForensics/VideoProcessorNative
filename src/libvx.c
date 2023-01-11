@@ -990,15 +990,14 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* frame)
 {
 	vx_error err = VX_ERR_SUCCESS;
-	int line_size;
 
 	int sample_count = video->audio_codec_ctx->frame_size <= 0
-		? video->options.audio_params.sample_rate * 4
-		: video->audio_codec_ctx->frame_size;
+		? video->options.audio_params.sample_rate * video->options.audio_params.channels
+		: video->audio_codec_ctx->frame_size * video->options.audio_params.channels;
 
 	int ret = av_samples_alloc_array_and_samples(
 		&frame->audio_buffer,
-		&line_size,
+		NULL,
 		video->options.audio_params.channels,
 		sample_count,
 		vx_to_av_sample_fmt(video->options.audio_params.sample_format),
@@ -1357,7 +1356,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count;
+	frame->audio_sample_count = dst_sample_count * out_params.channels;
 
 	return VX_ERR_SUCCESS;
 }
