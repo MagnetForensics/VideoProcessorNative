@@ -1567,8 +1567,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
-		float test = AUDIO_BUFFER_SECONDS * 0.75;
-		float test1 =  video->options.audio_params.sample_rate* (AUDIO_BUFFER_SECONDS * 0.75);
+
 		if (video->sample_count < video->options.audio_params.sample_rate * (AUDIO_BUFFER_SECONDS * 0.75)) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
@@ -1587,9 +1586,15 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.prompt_n_tokens = video->transcription_hints_count;
 			params.audio_ctx = 0;
 
+			// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
+			// Save any remaining samples to be processed with the next batch
+			// TODO: Handle processing of all remaining samples on last frame. Pad with silence?
+			int samples_to_keep = video->sample_count % video->options.audio_params.sample_rate;
+			int samples_to_process = video->sample_count - samples_to_keep;
+
 			// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
 			// In this case, linesize is the buffer size, in bytes, for the 1 plane
-			int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], video->sample_count);
+			int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], samples_to_process);
 
 			if (whisper_result == 0) {
 				const int n_segments = whisper_full_n_segments(video->whisper_ctx);
@@ -1609,11 +1614,13 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 				// Keep the last few samples to mitigate word boundary issues
 				int keep_ms = 200;
-				int keep_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
+				int boundary_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
+				samples_to_keep += boundary_samples;
 
-				av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - keep_samples, keep_samples, video->options.audio_params.channels, sample_format);
-				av_samples_set_silence(video->audio_buffer, keep_samples, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - keep_samples, video->options.audio_params.channels, sample_format);
-				video->sample_count = keep_samples;
+				if (samples_to_keep > 0)
+					av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - samples_to_keep, samples_to_keep, video->options.audio_params.channels, sample_format);
+				av_samples_set_silence(video->audio_buffer, samples_to_keep, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, video->options.audio_params.channels, sample_format);
+				video->sample_count = samples_to_keep;
 
 				// Add tokens of the last full length segment as the prompt
 				memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
