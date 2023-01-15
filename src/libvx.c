@@ -1624,7 +1624,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 				// Keep the last few samples to mitigate word boundary issues
 				int keep_ms = 200;
-				int boundary_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate * video->options.audio_params.channels);
+				int boundary_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
 				samples_to_keep += boundary_samples;
 
 				if (samples_to_keep > 0)
@@ -1639,7 +1639,8 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 				if (n_segments > 0) {
 					int last_segment = n_segments - 1;
 					const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
-					for (int j = 0; j < min(token_count, params.max_tokens); ++j) {
+					const int token_offset = token_count - min(token_count, params.max_tokens);
+					for (int j = token_offset; j < min(token_count, params.max_tokens); ++j) {
 						video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
 						video->transcription_hints_count++;
 					}
