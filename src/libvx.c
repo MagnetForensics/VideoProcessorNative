@@ -642,7 +642,7 @@ static bool find_stream_and_open_codec(
 	}
 
 	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
-		(*out_codec_ctx)->max_samples = min(10000, me->options.audio_params.sample_rate);
+		(*out_codec_ctx)->max_samples = max(100000, me->options.audio_params.sample_rate);
 
 	return true;
 }
@@ -762,21 +762,14 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
-		// Whisper sample requirements
-		me->options.audio_params.sample_rate = 16000;
-		me->options.audio_params.sample_format = VX_SAMPLE_FMT_FLT;
-		me->options.audio_params.channels = 1;
-
-		int line_size;
+		const vx_audio_params params = me->options.audio_params;
 		int ret = av_samples_alloc_array_and_samples(
 			&me->audio_buffer,
-			&line_size,
-			me->options.audio_params.channels,
-			me->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS,
+			NULL,
+			params.channels,
+			params.sample_rate * AUDIO_BUFFER_SECONDS,
 			AV_SAMPLE_FMT_FLT,
 			0);
-
-		vx_audio_params params = me->options.audio_params;
 
 		if ((error = vx_set_audio_params(me, params.sample_rate, params.channels, params.sample_format)) != VX_ERR_SUCCESS) {
 			goto cleanup;
@@ -1045,14 +1038,12 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 		vx_to_av_sample_fmt(video->options.audio_params.sample_format),
 		0);
 
-	if (ret < 0) {
+	if (ret < 0)
 		err = VX_ERR_ALLOCATE;
-	}
 
 	frame->audio_info.transcription = malloc((2048 + 1) * sizeof(char));
-	if (!frame->audio_info.transcription) {
+	if (!frame->audio_info.transcription)
 		return VX_ERR_ALLOCATE;
-	}
 
 	frame->audio_info.transcription[0] = '\0';
 
@@ -1417,7 +1408,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count * out_params.channels;
+	frame->audio_sample_count = dst_sample_count;
 
 	return VX_ERR_SUCCESS;
 }
