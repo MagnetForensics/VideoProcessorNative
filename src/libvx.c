@@ -641,8 +641,8 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
-	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
-		(*out_codec_ctx)->max_samples = max(100000, me->options.audio_params.sample_rate);
+	//if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
+	//	(*out_codec_ctx)->max_samples = max(100000, me->options.audio_params.sample_rate);
 
 	return true;
 }
@@ -1026,7 +1026,7 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 {
 	vx_error err = VX_ERR_SUCCESS;
 	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
-		? video->audio_codec_ctx->max_samples
+		? video->audio_codec_ctx->sample_rate
 		: video->audio_codec_ctx->frame_size;
 	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
