@@ -593,8 +593,12 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 	return err;
 }
 
-static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
-	int* out_stream, AVCodecContext** out_codec_ctx, vx_error* out_error)
+static bool find_stream_and_open_codec(
+	vx_video* me,
+	enum AVMediaType type,
+	int* out_stream,
+	AVCodecContext** out_codec_ctx,
+	vx_error* out_error)
 {
 	AVCodec* codec;
 	AVCodecContext* codec_ctx;
@@ -636,6 +640,9 @@ static bool find_stream_and_open_codec(vx_video* me, enum AVMediaType type,
 		*out_error = VX_ERR_OPEN_CODEC;
 		return false;
 	}
+
+	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
+		(*out_codec_ctx)->max_samples = min(10000, me->options.audio_params.sample_rate);
 
 	return true;
 }
@@ -1025,15 +1032,14 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* frame)
 {
 	vx_error err = VX_ERR_SUCCESS;
-	int line_size;
-
-	int sample_count = video->audio_codec_ctx->frame_size <= 0
-		? video->options.audio_params.sample_rate
+	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
+		? video->audio_codec_ctx->max_samples
 		: video->audio_codec_ctx->frame_size;
+	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
 	int ret = av_samples_alloc_array_and_samples(
 		&frame->audio_buffer,
-		&line_size,
+		NULL,
 		video->options.audio_params.channels,
 		sample_count,
 		vx_to_av_sample_fmt(video->options.audio_params.sample_format),
@@ -1116,6 +1122,16 @@ void vx_frame_destroy(vx_frame* me)
 	free(me);
 }
 
+/// <summary>
+/// Make a best guess to whether a frame contains an image. Some codecs do not set all
+/// frame properties so just checking the picture type is not sufficient
+/// </summary>
+bool vx_frame_has_image(const AVFrame* frame)
+{
+	return frame->pict_type != AV_PICTURE_TYPE_NONE || (frame->width > 0 && frame->height > 0 && frame->nb_samples == 0);
+}
+
+
 void* vx_frame_get_video_buffer(vx_frame* frame, int* out_buffer_size)
 {
 	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
@@ -1128,7 +1144,9 @@ void* vx_frame_get_audio_buffer(const vx_frame* frame, int* out_sample_count)
 {
 	*out_sample_count = frame->audio_sample_count;
 
-	return frame->audio_buffer[0];
+	return frame->audio_buffer
+		? frame->audio_buffer[0]
+		: NULL;
 }
 
 vx_audio_info vx_frame_get_audio_info(const vx_frame* frame)
@@ -1399,7 +1417,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count;
+	frame->audio_sample_count = dst_sample_count * out_params.channels;
 
 	return VX_ERR_SUCCESS;
 }
@@ -1484,9 +1502,10 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
 
-		int stream_type = frame->pict_type != AV_PICTURE_TYPE_NONE
-			? me->video_stream
-			: me->audio_stream;
+		// Check for audio before defaulting to video. Some codecs fail to write the picture type to frames
+		int stream_type = frame->pict_type == AV_PICTURE_TYPE_NONE && frame->nb_samples > 0
+			? me->audio_stream
+			: me->video_stream;
 
 		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
 			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
@@ -1500,7 +1519,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		// TODO: Handle duplicate audio timestamps
 		frame_info->timestamp = vx_estimate_timestamp(me, stream_type, frame->best_effort_timestamp);
 		frame_info->timestamp_original = ts;
-		frame_info->flags = frame->pict_type != AV_PICTURE_TYPE_NONE ? VX_FF_HAS_IMAGE : 0;
+		frame_info->flags = vx_frame_has_image(frame) ? VX_FF_HAS_IMAGE : 0;
 		frame_info->flags |= frame->nb_samples > 0 ? VX_FF_HAS_AUDIO : 0;
 		frame_info->flags |= frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
 		if (frame->pkt_pos != -1)
@@ -1714,7 +1733,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		goto cleanup;
 
 	// Run the frame through the filter pipeline, if any
-	if (av_frame->pict_type != AV_PICTURE_TYPE_NONE) {
+	if (vx_frame_has_image(av_frame)) {
 		if ((ret = vx_frame_transfer_video_data(video, av_frame, frame)) != VX_ERR_SUCCESS) {
 			goto cleanup;
 		}
