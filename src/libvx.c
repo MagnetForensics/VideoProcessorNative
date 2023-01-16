@@ -1033,7 +1033,7 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 {
 	vx_error err = VX_ERR_SUCCESS;
 	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
-		? video->audio_codec_ctx->sample_rate
+		? video->audio_codec_ctx->sample_rate * 4 // 4 seconds of buffer
 		: video->audio_codec_ctx->frame_size;
 	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
@@ -1048,10 +1048,12 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 	if (ret < 0)
 		err = VX_ERR_ALLOCATE;
 
-	for (int i = 0; i < 10; i++) {
-		frame->audio_info.transcription[i].text = malloc((256 + 1) * sizeof(char));
-		if (!frame->audio_info.transcription[i].text)
-			return VX_ERR_ALLOCATE;
+	if (video->options.audio_params.transcribe) {
+		for (int i = 0; i < 10; i++) {
+			frame->audio_info.transcription[i].text = malloc((256 + 1) * sizeof(char));
+			if (!frame->audio_info.transcription[i].text)
+				return VX_ERR_ALLOCATE;
+		}
 	}
 
 	return err;
@@ -1113,8 +1115,10 @@ void vx_frame_destroy(vx_frame* me)
 		av_freep(&me->audio_buffer);
 	}
 
-	if (me->audio_info.transcription) {
-		free(me->audio_info.transcription);
+	for (int i = 0; i < 10; i++) {
+		const vx_audio_transcription* segment = &me->audio_info.transcription[i];
+		if (segment->text)
+			free(*segment->text);
 	}
 
 	free(me);
@@ -1582,6 +1586,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 	// Fill the audio buffer
 	if (result == VX_ERR_SUCCESS)
 		result = vx_frame_process_audio(video, av_frame, frame);
+
 	if (video->options.audio_params.transcribe) {
 		// Clear previous transcription segments
 		for (int i = 0; i < 10; i++) {
