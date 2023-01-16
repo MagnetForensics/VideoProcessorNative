@@ -1577,8 +1577,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
+		int max_samples = video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS;
 
-		if (video->sample_count < video->options.audio_params.sample_rate * (AUDIO_BUFFER_SECONDS * 0.75)) {
+		if (video->sample_count + frame->audio_sample_count < max_samples) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
 			frame->audio_info.transcription[0] = '\0';
@@ -1646,6 +1647,10 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 					}
 				}
 			}
+
+			// Finally, store the samples that would not fit
+			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
+			video->sample_count += frame->audio_sample_count;
 		}
 	}
 
