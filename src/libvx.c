@@ -1591,7 +1591,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
 			params.no_context = true;
-			//params.max_tokens = 32;
+			params.max_tokens = 32;
 			params.prompt_tokens = video->transcription_hints;
 			params.prompt_n_tokens = video->transcription_hints_count;
 			params.audio_ctx = 0;
@@ -1638,10 +1638,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 				if (n_segments > 0) {
 					int last_segment = n_segments - 1;
-					int max_tokens = 32;
 					const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
-					const int token_offset = token_count - min(token_count, max_tokens);
-					for (int j = token_offset; j < min(token_count, max_tokens); ++j) {
+					const int token_offset = token_count - min(token_count, params.max_tokens);
+					for (int j = token_offset; j < min(token_count, params.max_tokens); ++j) {
 						video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
 						video->transcription_hints_count++;
 					}
