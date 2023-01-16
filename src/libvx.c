@@ -49,12 +49,19 @@ struct vx_rectangle
 	int height;
 };
 
+struct vx_audio_transcription
+{
+	int64_t ts_start;
+	int64_t ts_end;
+	char* text;
+};
+
 struct vx_audio_info
 {
 	double peak_level;
 	double rms_level;
 	double rms_peak;
-	char* transcription;
+	vx_audio_transcription transcription[10];
 };
 
 struct vx_scene_info
@@ -1041,11 +1048,11 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 	if (ret < 0)
 		err = VX_ERR_ALLOCATE;
 
-	frame->audio_info.transcription = malloc((2048 + 1) * sizeof(char));
-	if (!frame->audio_info.transcription)
-		return VX_ERR_ALLOCATE;
-
-	frame->audio_info.transcription[0] = '\0';
+	for (int i = 0; i < 10; i++) {
+		frame->audio_info.transcription[i].text = malloc((256 + 1) * sizeof(char));
+		if (!frame->audio_info.transcription[i].text)
+			return VX_ERR_ALLOCATE;
+	}
 
 	return err;
 }
@@ -1576,13 +1583,19 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 	if (result == VX_ERR_SUCCESS)
 		result = vx_frame_process_audio(video, av_frame, frame);
 	if (video->options.audio_params.transcribe) {
+		// Clear previous transcription segments
+		for (int i = 0; i < 10; i++) {
+			frame->audio_info.transcription[i].ts_start = 0;
+			frame->audio_info.transcription[i].ts_end = 0;
+			frame->audio_info.transcription[i].text[0] = '\0';
+		}
+
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
 		int max_samples = video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS;
 
 		if (video->sample_count + frame->audio_sample_count < max_samples) {
 			av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
 			video->sample_count += frame->audio_sample_count;
-			frame->audio_info.transcription[0] = '\0';
 		}
 		else {
 			// Transcribe audio
@@ -1592,6 +1605,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
 			params.no_context = true;
+			params.token_timestamps = true;
 			params.max_tokens = 32;
 			params.prompt_tokens = video->transcription_hints;
 			params.prompt_n_tokens = video->transcription_hints_count;
@@ -1610,23 +1624,21 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			if (whisper_result == 0) {
 				const int n_segments = whisper_full_n_segments(video->whisper_ctx);
 				for (int i = 0; i < n_segments; i++) {
-					if (!params.token_timestamps) {
-						const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
-						strcat(frame->audio_info.transcription, text);
-					}
-					else {
-						const int64_t t0 = whisper_full_get_segment_t0(video->whisper_ctx, i);
-						const int64_t t1 = whisper_full_get_segment_t1(video->whisper_ctx, i);
-						const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+					vx_audio_transcription* transcription = &frame->audio_info.transcription[i];
+					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
 
-						printf("[%s --> %s]  %s\n", to_timestamp(t0), to_timestamp(t1), text);
-					}
+					const int64_t t0 = params.token_timestamps ? whisper_full_get_segment_t0(video->whisper_ctx, i) : 0;
+					const int64_t t1 = params.token_timestamps ? whisper_full_get_segment_t1(video->whisper_ctx, i) : 0;
+
+					// Timestamps in milliseconds
+					transcription->ts_start = t0 * 10;
+					transcription->ts_end = t1 * 10;
+					transcription->text = text;
 				}
 
 				// Keep the last few samples to mitigate word boundary issues
 				int keep_ms = 200;
-				int boundary_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
-				samples_to_keep += boundary_samples;
+				samples_to_keep += (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
 
 				if (samples_to_keep > 0)
 					av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - samples_to_keep, samples_to_keep, video->options.audio_params.channels, sample_format);

@@ -11,6 +11,7 @@ extern "C" {
 typedef struct vx_video vx_video;
 typedef struct vx_audio_params vx_audio_params;
 typedef struct vx_video_options vx_video_options;
+typedef struct vx_audio_transcription vx_audio_transcription;
 typedef struct vx_audio_info vx_audio_info;
 typedef struct vx_scene_info vx_scene_info;
 typedef struct vx_frame vx_frame;
