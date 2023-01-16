@@ -32,7 +32,7 @@
 #define dprintf(...)
 #endif
 
-#define AUDIO_BUFFER_SECONDS 8
+#define AUDIO_BUFFER_SECONDS 6
 #define FRAME_QUEUE_SIZE 32
 #define FRAME_BUFFER_PADDING 4096
 #define LOG_TRACE_BUFSIZE 4096
@@ -1600,7 +1600,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
 			// Save any remaining samples to be processed with the next batch
 			// TODO: Handle processing of all remaining samples on last frame. Pad with silence?
-			int samples_to_keep = video->sample_count % video->options.audio_params.sample_rate;
+			//int samples_to_keep = video->sample_count % video->options.audio_params.sample_rate;
+			int samples_five_seconds = video->options.audio_params.sample_rate * 5;
+			int samples_to_keep = max(0, video->sample_count - samples_five_seconds);
 			int samples_to_process = video->sample_count - samples_to_keep;
 
 			// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
@@ -1625,8 +1627,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 				// Keep the last few samples to mitigate word boundary issues
 				int keep_ms = 200;
-				int boundary_samples = (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
-				samples_to_keep += boundary_samples;
+				samples_to_keep += (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
 
 				if (samples_to_keep > 0)
 					av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - samples_to_keep, samples_to_keep, video->options.audio_params.channels, sample_format);
