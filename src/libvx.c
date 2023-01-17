@@ -1033,7 +1033,7 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 {
 	vx_error err = VX_ERR_SUCCESS;
 	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
-		? video->audio_codec_ctx->sample_rate * 4 // 4 seconds of buffer
+		? (int64_t)video->audio_codec_ctx->sample_rate * 4 // 4 seconds of buffer
 		: video->audio_codec_ctx->frame_size;
 	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
@@ -1560,23 +1560,6 @@ vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 	return first_error;
 }
 
-//  500 -> 00:05.000
-// 6000 -> 01:00.000
-char* to_timestamp(int64_t t) {
-	int64_t msec = t * 10;
-	int64_t hr = msec / (1000 * 60 * 60);
-	msec = msec - hr * (1000 * 60 * 60);
-	int64_t min = msec / (1000 * 60);
-	msec = msec - min * (1000 * 60);
-	int64_t sec = msec / 1000;
-	msec = msec - sec * 1000;
-
-	char buf[32];
-	snprintf(buf, sizeof(buf), "%02d:%02d:%02d%s%03d", (int)hr, (int)min, (int)sec, ".", (int)msec);
-
-	return buf;
-}
-
 vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error result = VX_ERR_SUCCESS;
@@ -1638,7 +1621,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 					// Timestamps in milliseconds
 					transcription->ts_start = t0 * 10;
 					transcription->ts_end = t1 * 10;
-					transcription->text = text;
+					strcpy(transcription->text, text);
 				}
 
 				// Keep the last few samples to mitigate word boundary issues
