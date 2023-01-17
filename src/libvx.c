@@ -1610,7 +1610,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], samples_to_process);
 
 			if (whisper_result == 0) {
+				int keep_ms = 200;
 				const int n_segments = whisper_full_n_segments(video->whisper_ctx);
+
 				for (int i = 0; i < n_segments; i++) {
 					vx_audio_transcription* transcription = &frame->audio_info.transcription[i];
 					const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
@@ -1619,13 +1621,12 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 					const int64_t t1 = params.token_timestamps ? whisper_full_get_segment_t1(video->whisper_ctx, i) : 0;
 
 					// Timestamps in milliseconds
-					transcription->ts_start = t0 * 10;
-					transcription->ts_end = t1 * 10;
+					transcription->ts_start = max((t0 * 10) - keep_ms, 0);
+					transcription->ts_end = max((t0 * 10) - keep_ms, 0);
 					strcpy(transcription->text, text);
 				}
 
 				// Keep the last few samples to mitigate word boundary issues
-				int keep_ms = 200;
 				samples_to_keep += (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
 
 				if (samples_to_keep > 0)
