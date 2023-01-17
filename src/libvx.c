@@ -1560,6 +1560,15 @@ vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 	return first_error;
 }
 
+int64_t vx_whipser_timestamp_to_ms(int64_t t) {
+	int64_t sec = t / 100;
+	int64_t msec = t - sec * 100;
+	int64_t min = sec / 60;
+	sec = sec - min * 60;
+
+	return (min * 60000) + (sec * 1000) + msec;
+}
+
 vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error result = VX_ERR_SUCCESS;
@@ -1622,7 +1631,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 					// Timestamps in milliseconds
 					transcription->ts_start = max((t0 * 10) - keep_ms, 0);
-					transcription->ts_end = max((t0 * 10) - keep_ms, 0);
+					transcription->ts_end = max((t1 * 10) - keep_ms, 0);
 					strcpy(transcription->text, text);
 				}
 
