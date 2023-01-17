@@ -714,7 +714,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	// Open stream
 	int open_result = avformat_open_input(&me->fmt_ctx, filename, NULL, NULL);
 	if (open_result != 0) {
-		if (open_result == AVERROR(ENOENT)) {
+		if (open_result == AVERROR(ENOENT) || open_result == AVERROR(EINVAL)) {
 			error = VX_ERR_FILE_NOT_FOUND;
 		}
 		else {
