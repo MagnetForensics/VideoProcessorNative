@@ -786,7 +786,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			goto cleanup;
 
 		if (params.transcribe) {
-			me->whisper_ctx = whisper_init("ggml-model-whisper-base.en.bin");
+			me->whisper_ctx = whisper_init("ggml-model-whisper-base.bin");
 
 			char* sys_info = whisper_print_system_info();
 			printf("%s", sys_info);
@@ -1597,16 +1597,17 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		else {
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-			params.language = "en";
+			params.language = "auto";
 			params.print_progress = false;
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
 			params.no_context = true;
+			params.audio_ctx = 0;
 			params.token_timestamps = true;
 			params.max_tokens = 32;
 			params.prompt_tokens = video->transcription_hints;
 			params.prompt_n_tokens = video->transcription_hints_count;
-			params.audio_ctx = 0;
+			params.translate = true;
 
 			// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
 			// Save any remaining samples to be processed with the next batch
