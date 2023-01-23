@@ -1597,7 +1597,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		else {
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-			params.language = "auto";
+			params.language = "sv";
 			params.print_progress = false;
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
