@@ -1590,10 +1590,12 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 	if (video->options.audio_params.transcribe) {
 		// Clear previous transcription segments
 		for (int i = 0; i < 10; i++) {
-			frame->audio_info.transcription[i].ts_start = 0;
-			frame->audio_info.transcription[i].ts_end = 0;
-			frame->audio_info.transcription[i].text[0] = '\0';
-			frame->audio_info.transcription[i].language[0] = '\0';
+			vx_audio_transcription* segment = &frame->audio_info.transcription[i];
+			segment->ts_start = 0;
+			segment->ts_end = 0;
+			segment->text[0] = '\0';
+			segment->text_length = 0;
+			segment->language[0] = '\0';
 		}
 
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
@@ -1616,7 +1618,6 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.max_tokens = 32;
 			params.prompt_tokens = video->transcription_hints;
 			params.prompt_n_tokens = video->transcription_hints_count;
-			params.translate = false;
 
 			// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
 			// Save any remaining samples to be processed with the next batch
