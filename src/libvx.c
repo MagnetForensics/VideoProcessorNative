@@ -1632,7 +1632,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 
 					// Timestamps in milliseconds
 					transcription->ts_start = max((t0 * 10) - keep_ms, 0);
-					transcription->ts_end = max(t1 * 10, 0);
+					transcription->ts_end = max((t1 * 10) - keep_ms, 0);
 					strcpy(transcription->text, text);
 				}
 
