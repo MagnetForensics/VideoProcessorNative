@@ -1593,6 +1593,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			frame->audio_info.transcription[i].ts_start = 0;
 			frame->audio_info.transcription[i].ts_end = 0;
 			frame->audio_info.transcription[i].text[0] = '\0';
+			frame->audio_info.transcription[i].language[0] = '\0';
 		}
 
 		enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
