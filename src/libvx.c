@@ -54,6 +54,8 @@ struct vx_audio_transcription
 	int64_t ts_start;
 	int64_t ts_end;
 	char* text;
+	int text_length;
+	char* language;
 };
 
 struct vx_audio_info
@@ -1053,6 +1055,10 @@ static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* fram
 			frame->audio_info.transcription[i].text = malloc((256 + 1) * sizeof(char));
 			if (!frame->audio_info.transcription[i].text)
 				return VX_ERR_ALLOCATE;
+
+			frame->audio_info.transcription[i].language = malloc((2 + 1) * sizeof(char));
+			if (!frame->audio_info.transcription[i].language)
+				return VX_ERR_ALLOCATE;
 		}
 	}
 
@@ -1119,6 +1125,8 @@ void vx_frame_destroy(vx_frame* me)
 		const vx_audio_transcription* segment = &me->audio_info.transcription[i];
 		if (segment->text)
 			free(*segment->text);
+		if (segment->language)
+			free(*segment->language);
 	}
 
 	free(me);
@@ -1633,7 +1641,10 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 					// Timestamps in milliseconds
 					transcription->ts_start = max((t0 * 10) - keep_ms, 0);
 					transcription->ts_end = max((t1 * 10) - keep_ms, 0);
-					strcpy(transcription->text, text);
+					strcpy_s(transcription->text, 256 + 1, text);
+					transcription->text_length = (int)strlen(text);
+					//transcription->language = whisper_full_lang_id(video->whisper_ctx); // TODO: Available in latest version of whisper.cpp
+					strcpy_s(transcription->language, 2 + 1, "en");
 				}
 
 				// Keep the last few samples to mitigate word boundary issues
