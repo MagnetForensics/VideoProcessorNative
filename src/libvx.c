@@ -1647,6 +1647,8 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 					transcription->text_length = (int)strlen(text);
 					//transcription->language = whisper_full_lang_id(video->whisper_ctx); // TODO: Available in latest version of whisper.cpp
 					strcpy_s(transcription->language, 2 + 1, "en");
+
+					dprintf(text);
 				}
 
 				// Keep the last few samples to mitigate word boundary issues
