@@ -1597,7 +1597,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 		else {
 			// Transcribe audio
 			struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-			params.language = "se";
+			params.language = "auto";
 			params.print_progress = false;
 			params.n_threads = 8;
 			params.duration_ms = 0; // Use all the provided samples
@@ -1607,7 +1607,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 			params.max_tokens = 32;
 			params.prompt_tokens = video->transcription_hints;
 			params.prompt_n_tokens = video->transcription_hints_count;
-			params.translate = true;
+			params.translate = false;
 
 			// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
 			// Save any remaining samples to be processed with the next batch
