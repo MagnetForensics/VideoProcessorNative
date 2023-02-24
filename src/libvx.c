@@ -381,10 +381,12 @@ static vx_error vx_initialize_rotation_filter(const AVStream* stream, AVFilterCo
 	return VX_ERR_SUCCESS;
 }
 
-static vx_error vx_init_filter_pipeline(vx_video* video)
+static vx_error vx_init_filter_pipeline(vx_video* video, int frame_width, int frame_height)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
+	frame_width = frame_width == NULL ? video->video_codec_ctx->width : frame_width;
+	frame_height = frame_height == NULL ? video->video_codec_ctx->height : frame_height;
 	AVFilterContext* filter_source;
 	AVFilterContext* last_filter;
 	int pad_index = 0;
@@ -411,7 +413,7 @@ static vx_error vx_init_filter_pipeline(vx_video* video)
 
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-		video->video_codec_ctx->width, video->video_codec_ctx->height, format,
+		frame_width, frame_height, format,
 		video_stream->time_base.num, video_stream->time_base.den,
 		video->video_codec_ctx->sample_aspect_ratio.num, video->video_codec_ctx->sample_aspect_ratio.den);
 
@@ -746,7 +748,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->video_codec_ctx->pix_fmt != AV_PIX_FMT_NONE) {
-		if ((error = vx_init_filter_pipeline(me)) != VX_ERR_SUCCESS)
+		if ((error = vx_init_filter_pipeline(me, NULL, NULL)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
@@ -1240,6 +1242,16 @@ static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
 	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
 		const AVFilterContext* filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
 		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
+
+		// Reinitialize the pipeline if the frame size has changed
+		if (filter_source->outputs[0]->w != av_frame->width || filter_source->outputs[0]->h != av_frame->height) {
+			avfilter_graph_free(&video->filter_pipeline);
+			if ((result = vx_init_filter_pipeline(video, av_frame->width, av_frame->height) != VX_ERR_SUCCESS))
+				return result;
+
+			filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
+			filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
+		}
 
 		if (!(filter_source && filter_sink)) {
 			result = VX_ERR_INIT_FILTER;
