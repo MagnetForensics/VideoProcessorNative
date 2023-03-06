@@ -747,17 +747,16 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			goto cleanup;
 	}
 
-	if (me->audio_codec_ctx) {
+	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
 		struct av_audio_params params = {
 			.channel_layout = me->audio_codec_ctx->ch_layout,
 			.sample_format = me->audio_codec_ctx->sample_fmt,
 			.sample_rate = me->audio_codec_ctx->sample_rate,
 			.time_base = me->audio_codec_ctx->time_base
 		};
-		if (me->options.audio_params.channels > 0) {
-			if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
-				goto cleanup;
-			}
+
+		if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
+			goto cleanup;
 		}
 
 		if ((error = vx_init_audio_filter_pipeline(me, params)) != VX_ERR_SUCCESS)
