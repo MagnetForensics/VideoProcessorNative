@@ -1385,7 +1385,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count * out_params.channels;
+	frame->audio_sample_count = dst_sample_count;
 
 	return VX_ERR_SUCCESS;
 }
