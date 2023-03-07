@@ -97,10 +97,10 @@ struct vx_audio_params
 
 struct av_audio_params
 {
-	int channels;
-	int64_t channel_layout;
-	int sample_format;
+	AVChannelLayout channel_layout;
+	enum AVSampleFormat sample_format;
 	int sample_rate;
+	AVRational time_base;
 };
 
 struct vx_video_options
