@@ -678,7 +678,7 @@ vx_error vx_init_audio_resampler(vx_video* me, const struct av_audio_params in_p
 	return VX_ERR_SUCCESS;
 
 cleanup:
-	if (me->swr_ctx && err != VX_ERR_SUCCESS)
+	if (me->swr_ctx)
 		swr_free(&me->swr_ctx);
 
 	return err;
