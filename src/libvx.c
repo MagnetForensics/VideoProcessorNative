@@ -453,11 +453,10 @@ cleanup:
 static vx_error vx_init_audio_filter_pipeline(vx_video* video, struct av_audio_params params)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
-	const AVStream* audio_stream = video->fmt_ctx->streams[video->audio_stream];
-	AVFilterContext* filter_source;
-	AVFilterContext* last_filter;
+	AVFilterContext* last_filter = NULL;
 	int pad_index = 0;
 	char args[512];
+	char layout[100];
 
 	if (video->filter_pipeline_audio)
 		avfilter_graph_free(&video->filter_pipeline_audio);
@@ -472,7 +471,6 @@ static vx_error vx_init_audio_filter_pipeline(vx_video* video, struct av_audio_p
 	if (params.channel_layout.order == AV_CHANNEL_ORDER_UNSPEC)
 		av_channel_layout_default(&params.channel_layout, params.channel_layout.nb_channels);
 
-	char layout[100];
 	av_channel_layout_describe(&params.channel_layout, layout, sizeof(layout));
 
 	snprintf(
@@ -487,13 +485,12 @@ static vx_error vx_init_audio_filter_pipeline(vx_video* video, struct av_audio_p
 		params.channel_layout.nb_channels);
 
 	// Create the filter pipeline audio source
-	if (avfilter_graph_create_filter(&filter_source, avfilter_get_by_name("abuffer"), "in", args, NULL, video->filter_pipeline_audio) < 0) {
+	if (avfilter_graph_create_filter(&last_filter, avfilter_get_by_name("abuffer"), "in", args, NULL, video->filter_pipeline_audio) < 0) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
 		goto cleanup;
 	}
 
 	// Create and link up the filter nodes
-	last_filter = filter_source;
 	if ((result = vx_initialize_audio_filter(&last_filter, &pad_index)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
@@ -506,6 +503,14 @@ static vx_error vx_init_audio_filter_pipeline(vx_video* video, struct av_audio_p
 	}
 
 cleanup:
+	if (result != VX_ERR_SUCCESS) {
+		if (last_filter)
+			avfilter_free(last_filter);
+
+		if (video->filter_pipeline_audio)
+			avfilter_graph_free(&video->filter_pipeline_audio);
+	}
+
 	return result;
 }
 
@@ -800,6 +805,10 @@ static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream
 	int64_t last_fp = avio_tell(fmt_ctx->pb);
 
 	for (int i = 0; i < 1024; i++) {
+		// The packet will be overwritten so it must be cleared first
+		if (packet && packet->data)
+			av_packet_unref(packet);
+
 		int ret = av_read_frame(fmt_ctx, packet);
 
 		// Success
@@ -1182,6 +1191,10 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 		goto cleanup;
 	}
 	if (vx_is_packet_error(result)) {
+		char error_message[64] = { 0 };
+		if (av_strerror(result, &error_message, 64) > 0)
+			av_log(NULL, AV_LOG_ERROR, "%s", error_message);
+
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
 	}
