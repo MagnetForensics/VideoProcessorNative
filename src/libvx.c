@@ -255,6 +255,39 @@ static AVFrame* vx_get_first_queue_item(const vx_video* video)
 	return video->frame_queue[video->frame_queue_count - 1];
 }
 
+static struct av_audio_params vx_audio_params_from_context(const AVCodecContext* context)
+{
+	struct av_audio_params params = {
+		.channel_layout = context->ch_layout,
+		.sample_format = context->sample_fmt,
+		.sample_rate = context->sample_rate,
+		.time_base = context->time_base
+	};
+
+	return params;
+}
+
+static struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame)
+{
+	struct av_audio_params params = {
+		.channel_layout = frame->ch_layout,
+		.sample_format = frame->format,
+		.sample_rate = frame->sample_rate,
+		.time_base = frame->time_base
+	};
+
+	return params;
+}
+
+static bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio_params b)
+{
+	return av_channel_layout_compare(&a.channel_layout, &b.channel_layout) == 0
+		&& a.sample_rate == b.sample_rate
+		&& a.sample_format == b.sample_format
+		&& a.time_base.den == b.time_base.den
+		&& a.time_base.num == b.time_base.num;
+}
+
 static vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
 	vx_error result = VX_ERR_UNKNOWN;
@@ -450,7 +483,7 @@ cleanup:
 	return result;
 }
 
-static vx_error vx_init_audio_filter_pipeline(vx_video* video, struct av_audio_params params)
+static vx_error vx_init_audio_filter_pipeline(vx_video* video, const struct av_audio_params params)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	AVFilterContext* last_filter = NULL;
@@ -753,12 +786,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
-		struct av_audio_params params = {
-			.channel_layout = me->audio_codec_ctx->ch_layout,
-			.sample_format = me->audio_codec_ctx->sample_fmt,
-			.sample_rate = me->audio_codec_ctx->sample_rate,
-			.time_base = me->audio_codec_ctx->time_base
-		};
+		struct av_audio_params params = vx_audio_params_from_context(me->audio_codec_ctx);
 
 		if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
 			goto cleanup;
@@ -1075,12 +1103,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->pix_fmt = pix_fmt;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
-		struct av_audio_params params = {
-			.channel_layout = video->audio_codec_ctx->ch_layout,
-			.sample_format = video->audio_codec_ctx->sample_fmt,
-			.sample_rate = video->audio_codec_ctx->sample_rate,
-			.time_base = video->audio_codec_ctx->time_base
-		};
+		struct av_audio_params params = vx_audio_params_from_context(video->audio_codec_ctx);
 
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, video->audio_codec_ctx->frame_size) <= 0)
 			goto error;
@@ -1333,11 +1356,15 @@ static vx_error vx_filter_audio_frame(const vx_video* video, AVFrame* av_frame)
 		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline_audio, "out");
 
 		// Reinitialize the pipeline if the audio properties have changed
-		if (filter_source->outputs[0]->sample_rate != av_frame->sample_rate
-			|| filter_source->outputs[0]->ch_layout.nb_channels != av_frame->ch_layout.nb_channels) {
-			struct av_audio_params params = { av_frame->ch_layout, av_frame->format, av_frame->sample_rate, av_frame->time_base };
-
-			if ((result = vx_init_audio_filter_pipeline(video, params) != VX_ERR_SUCCESS))
+		const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(av_frame);
+		const struct av_audio_params filter_audio_params = {
+			.channel_layout = filter_source->outputs[0]->ch_layout,
+			.sample_format = filter_source->outputs[0]->format,
+			.sample_rate = filter_source->outputs[0]->sample_rate,
+			.time_base = filter_source->outputs[0]->time_base
+		};
+		if (!av_audio_params_equal(frame_audio_params, filter_audio_params)) {
+			if ((result = vx_init_audio_filter_pipeline(video, frame_audio_params) != VX_ERR_SUCCESS))
 				return result;
 
 			filter_source = avfilter_graph_get_filter(video->filter_pipeline_audio, "in");
@@ -1416,17 +1443,12 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 	}
 
 	struct av_audio_params initial_params = video->inital_audio_params;
-	struct av_audio_params params = { av_frame->ch_layout, av_frame->format, av_frame->sample_rate, av_frame->time_base };
+	struct av_audio_params params = vx_audio_params_from_frame(av_frame);
 	vx_audio_params out_params = video->options.audio_params;
 
 	int dst_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, params.sample_rate, AV_ROUND_UP);
 
-	if (initial_params.channel_layout.nb_channels != params.channel_layout.nb_channels
-		|| initial_params.channel_layout.order != params.channel_layout.order
-		|| initial_params.sample_rate != params.sample_rate
-		|| initial_params.sample_format != params.sample_format
-		|| (initial_params.time_base.den != params.time_base.den
-			&& initial_params.time_base.num != params.time_base.num))
+	if (!av_audio_params_equal(initial_params, params))
 	{
 		av_log(NULL, AV_LOG_INFO, "Audio format changed\n");
 		av_log(NULL, AV_LOG_INFO, "Channels:\t\t%d -> %d\n", initial_params.channel_layout.nb_channels, params.channel_layout.nb_channels);
