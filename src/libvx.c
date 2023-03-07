@@ -632,9 +632,6 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
-	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
-		(*out_codec_ctx)->max_samples = min(10000, me->options.audio_params.sample_rate);
-
 	return true;
 }
 
@@ -999,10 +996,12 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* frame)
 {
 	vx_error err = VX_ERR_SUCCESS;
-	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
-		? video->audio_codec_ctx->max_samples
+
+	// The maximum number of samples per frame, each frame will usually contain far fewer than this
+	int frame_samples_count = video->audio_codec_ctx->frame_size <= 0
+		? video->options.audio_params.sample_rate * 2 // Two seconds of buffer
 		: video->audio_codec_ctx->frame_size;
-	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
+	int sample_count = (int)av_rescale_rnd(frame_samples_count, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
 	int ret = av_samples_alloc_array_and_samples(
 		&frame->audio_buffer,
