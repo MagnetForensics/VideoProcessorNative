@@ -1417,7 +1417,10 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		int frame_samples = vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL);
 		if (frame_samples <= 0 || frame_samples < av_frame->nb_samples)
 			return VX_ERR_RESAMPLE_AUDIO;
-		vx_init_audio_resampler(video, params, out_params);
+		if (vx_init_audio_resampler(video, params, out_params) != VX_ERR_SUCCESS) {
+			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change.\n");
+			return VX_ERR_ALLOCATE;
+		}
 	}
 
 	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, dst_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
