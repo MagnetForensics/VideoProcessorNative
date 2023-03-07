@@ -1014,7 +1014,7 @@ static int vx_frame_init_audio_buffer(
 
 	// The maximum number of samples per frame, each frame will usually contain far fewer than this
 	int frame_buffer_size = !frame_size || frame_size <= 0
-		? in_params.sample_rate * 4 // Four seconds of buffer
+		? in_params.sample_rate * 2 // Two seconds of buffer
 		: frame_size;
 
 	// The number of samples required per channel
@@ -1419,7 +1419,8 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 
 		// Reinitialize resampler if audio format changes mid stream
 		int frame_samples = vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL);
-		if (frame_samples <= 0 || frame_samples < av_frame->nb_samples)
+		// Sanity check to make sure the frame audio buffer can handle the expected number of samples
+		if (frame_samples <= 0 || frame_samples < dst_sample_count)
 			return VX_ERR_RESAMPLE_AUDIO;
 		if (vx_init_audio_resampler(video, params, out_params) != VX_ERR_SUCCESS) {
 			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change.\n");
