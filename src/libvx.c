@@ -1318,6 +1318,7 @@ static vx_error vx_filter_audio_frame(const vx_video* video, AVFrame* av_frame)
 		if (filter_source->outputs[0]->sample_rate != av_frame->sample_rate
 			|| filter_source->outputs[0]->ch_layout.nb_channels != av_frame->ch_layout.nb_channels) {
 			struct av_audio_params params = { av_frame->ch_layout, av_frame->format, av_frame->sample_rate, av_frame->time_base };
+
 			if ((result = vx_init_audio_filter_pipeline(video, params) != VX_ERR_SUCCESS))
 				return result;
 
@@ -1434,7 +1435,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count * out_params.channels;
+	frame->audio_sample_count = dst_sample_count;
 
 	return VX_ERR_SUCCESS;
 }
