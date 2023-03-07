@@ -632,9 +632,6 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
-	if (type == AVMEDIA_TYPE_AUDIO && me->options.audio_params.sample_rate > 0)
-		(*out_codec_ctx)->max_samples = min(10000, me->options.audio_params.sample_rate);
-
 	return true;
 }
 
@@ -999,10 +996,12 @@ double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64
 static vx_error vx_frame_init_audio_buffer(const vx_video* video, vx_frame* frame)
 {
 	vx_error err = VX_ERR_SUCCESS;
-	int64_t frame_size = video->audio_codec_ctx->frame_size <= 0
-		? video->audio_codec_ctx->max_samples
+
+	// The maximum number of samples per frame, each frame will usually contain far fewer than this
+	int frame_samples_count = video->audio_codec_ctx->frame_size <= 0
+		? video->options.audio_params.sample_rate * 2 // Two seconds of buffer
 		: video->audio_codec_ctx->frame_size;
-	int sample_count = (int)av_rescale_rnd(frame_size, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
+	int sample_count = (int)av_rescale_rnd(frame_samples_count, video->options.audio_params.sample_rate, video->audio_codec_ctx->sample_rate, AV_ROUND_UP);
 
 	int ret = av_samples_alloc_array_and_samples(
 		&frame->audio_buffer,
@@ -1115,13 +1114,17 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
-static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frames_count)
+static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frame_count)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVCodecContext* codec_ctx = NULL;
 	AVFrame* frame = NULL;
 	int frame_count = 0;
-	*out_frames_count = 0;
+	*out_frame_count = 0;
+
+	// Clear the packet in case it is being reused
+	if (packet && packet->data)
+		av_packet_unref(packet);
 
 	// Get a packet, which will usually be a single video frame, or several complete audio frames
 	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
@@ -1183,12 +1186,13 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 			}
 			else {
 				// Dump the frame and the rest of the packet data to prevent buffer overrun
+				av_log(NULL, AV_LOG_WARNING, "Unable to return all frames, temporary frame buffer full. Dropping excess frames\n");
 				break;
 			}
 		}
 	}
 
-	*out_frames_count = frame_count;
+	*out_frame_count = frame_count;
 	ret = VX_ERR_SUCCESS;
 
 cleanup:
@@ -1385,7 +1389,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count * out_params.channels;
+	frame->audio_sample_count = dst_sample_count;
 
 	return VX_ERR_SUCCESS;
 }
@@ -1394,7 +1398,7 @@ vx_error vx_queue_frames(vx_video* me)
 {
 	vx_error ret = VX_ERR_SUCCESS;
 	AVPacket* packet = NULL;
-	static AVFrame* frame_buffer[50] = { NULL };
+	static AVFrame* frame_buffer[FRAME_QUEUE_SIZE] = { NULL };
 	int frame_idx = 0;
 	int frame_count = 0;
 
@@ -1429,14 +1433,14 @@ vx_error vx_queue_frames(vx_video* me)
 		}
 	}
 
-	return ret;
-
 cleanup:
-	for (int i = frame_idx; i < frame_count; i++) {
-		AVFrame* frame = frame_buffer[i];
-		if (frame) {
-			av_frame_unref(frame);
-			av_frame_free(&frame);
+	if (ret != VX_ERR_SUCCESS) {
+		for (int i = frame_idx; i < frame_count; i++) {
+			AVFrame* frame = frame_buffer[i];
+			if (frame) {
+				av_frame_unref(frame);
+				av_frame_free(&frame);
+			}
 		}
 	}
 
