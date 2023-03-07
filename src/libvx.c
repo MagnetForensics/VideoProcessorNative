@@ -798,6 +798,10 @@ static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream
 	int64_t last_fp = avio_tell(fmt_ctx->pb);
 
 	for (int i = 0; i < 1024; i++) {
+		// The packet will be overwritten so it must be cleared first
+		if (packet && packet->data)
+			av_packet_unref(packet);
+
 		int ret = av_read_frame(fmt_ctx, packet);
 
 		// Success
