@@ -1338,7 +1338,11 @@ static vx_error vx_filter_audio_frame(const vx_video* video, AVFrame* av_frame)
 		// The frame reference is being reused, so the old frame has to be cleaned up first
 		av_frame_unref(av_frame);
 
-		while (ret == 0) {
+		// More than one frame could be returned, depending on the filter graph layout or
+		// how many frames were fed to the buffer source.
+		// Only non-branching graphs are currently used, but this would need updating to handle
+		// multiple frames if more complex graphs were used.
+		while ((ret >= 0 || ret == AVERROR(EAGAIN)) && !av_frame->data[0]) {
 			ret = av_buffersink_get_frame(filter_sink, av_frame);
 
 			if (vx_is_packet_error(ret)) {
