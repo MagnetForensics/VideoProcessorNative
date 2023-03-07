@@ -1191,8 +1191,8 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 		goto cleanup;
 	}
 	if (vx_is_packet_error(result)) {
-		char error_message[64] = { 0 };
-		if (av_strerror(result, &error_message, 64) > 0)
+		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
+		if (av_strerror(result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
 			av_log(NULL, AV_LOG_ERROR, "%s", error_message);
 
 		ret = VX_ERR_DECODE_VIDEO;
