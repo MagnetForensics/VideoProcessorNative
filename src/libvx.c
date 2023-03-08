@@ -180,7 +180,25 @@ static AVFrame* vx_get_first_queue_item(const vx_video* video)
 	return video->frame_queue[video->frame_queue_count - 1];
 }
 
-static struct av_audio_params vx_audio_params_from_context(const AVCodecContext* context)
+static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
+{
+	enum AVPixelFormat format = AV_PIX_FMT_NONE;
+
+	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
+
+	if (frame_constraints) {
+		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
+		// The list of format is always terminated by AV_PIX_FMT_NONE,
+		// or the list will be NULL if the information is not known
+		format = frame_constraints->valid_sw_formats[0];
+
+		av_hwframe_constraints_free(&frame_constraints);
+	}
+
+	return format;
+}
+
+static struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* context)
 {
 	struct av_audio_params params = {
 		.channel_layout = context->ch_layout,
@@ -310,13 +328,51 @@ cleanup:
 	return result;
 }
 
+vx_error vx_get_filter_args(const AVCodecContext* codec, int args_length, char* out_args)
+{
+	vx_error result = VX_ERR_SUCCESS;
+
+	if (codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+		// Set the correct pixel format, we need to find the format that a hardware frame will
+		// be converted to after transferring to system memory, but before converting via scaling
+		enum AVPixelFormat format = codec->pix_fmt;
+		if (codec->hw_device_ctx)
+		{
+			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
+			if (!format) {
+				av_log(NULL, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
+				return VX_ERR_INIT_FILTER;
+			}
+		}
+
+		struct av_video_params params = {
+			.width = codec->width,
+			.height = codec->height,
+			.sample_aspect_ratio = codec->sample_aspect_ratio,
+			.pixel_format = format,
+			.time_base = codec->time_base
+		};
+		result = vx_get_video_filter_args(params, args_length, out_args);
+	}
+	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+		struct av_audio_params params = vx_audio_params_from_codec(codec);
+
+		result = vx_get_audio_filter_args(params, args_length, out_args);
+	}
+	else {
+		result = VX_ERR_INIT_FILTER;
+	}
+
+	return result;
+}
+
 static vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMediaType type)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	bool is_video = type == AVMEDIA_TYPE_VIDEO;
 	AVFilterContext* last_filter = NULL;
+	char args[256] = { 0 };
 	int pad_index = 0;
-	char args[256];
 
 	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
@@ -326,8 +382,11 @@ static vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMe
 	AVFilterGraph** filter_graph = is_video
 		? &video->filter_pipeline
 		: &video->filter_pipeline_audio;
+	const AVCodecContext* codec = is_video
+		? &video->video_codec_ctx
+		: &video->audio_codec_ctx;
 
-	if (vx_get_filter_args(video, type, sizeof(args), &args) != VX_ERR_SUCCESS)
+	if (vx_get_filter_args(codec, sizeof(args), &args) != VX_ERR_SUCCESS)
 		return VX_ERR_INIT_FILTER;
 
 	// Create the pipeline
@@ -599,7 +658,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_context(me->audio_codec_ctx);
+		struct av_audio_params params = vx_audio_params_from_codec(me->audio_codec_ctx);
 
 		if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
 			goto cleanup;
@@ -928,7 +987,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->pix_fmt = pix_fmt;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_context(video->audio_codec_ctx);
+		struct av_audio_params params = vx_audio_params_from_codec(video->audio_codec_ctx);
 
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, video->audio_codec_ctx->frame_size) <= 0)
 			goto error;
@@ -1141,7 +1200,7 @@ static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
 		// Reinitialize the pipeline if the frame size has changed
 		if (filter_source->outputs[0]->w != av_frame->width || filter_source->outputs[0]->h != av_frame->height) {
 			avfilter_graph_free(&video->filter_pipeline);
-			if ((result = vx_init_filter_pipeline(video, av_frame->width, av_frame->height) != VX_ERR_SUCCESS))
+			if ((result = vx_filtergraph_init(video->filter_pipeline, av_frame->width, av_frame->height) != VX_ERR_SUCCESS))
 				return result;
 
 			filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");

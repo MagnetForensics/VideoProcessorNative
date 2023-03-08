@@ -16,24 +16,6 @@
 #include "libvx.h"
 #include "filtergraph.h"
 
-static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
-{
-	enum AVPixelFormat format = AV_PIX_FMT_NONE;
-
-	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
-
-	if (frame_constraints) {
-		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
-		// The list of format is always terminated by AV_PIX_FMT_NONE,
-		// or the list will be NULL if the information is not known
-		format = frame_constraints->valid_sw_formats[0];
-
-		av_hwframe_constraints_free(&frame_constraints);
-	}
-
-	return format;
-}
-
 vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
 {
 	vx_error result = VX_ERR_UNKNOWN;
@@ -65,6 +47,46 @@ vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform,
 	return result;
 }
 
+vx_error vx_get_video_filter_args(struct av_video_params params, int args_length, char* out_args)
+{
+	snprintf(
+		out_args,
+		args_length,
+		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+		params.width,
+		params.height,
+		params.pixel_format,
+		params.time_base.num,
+		params.time_base.den,
+		params.sample_aspect_ratio.num,
+		params.sample_aspect_ratio.den);
+
+	return VX_ERR_SUCCESS;
+}
+
+vx_error vx_get_audio_filter_args(struct av_audio_params params, int args_length, char* out_args)
+{
+	char layout[100];
+
+	if (params.channel_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+		av_channel_layout_default(&params.channel_layout, params.channel_layout.nb_channels);
+
+	av_channel_layout_describe(&params.channel_layout, layout, sizeof(layout));
+
+	snprintf(
+		out_args,
+		args_length,
+		"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s:channels=%d",
+		params.time_base.num,
+		params.time_base.den,
+		params.sample_rate,
+		av_get_sample_fmt_name(params.sample_format),
+		layout,
+		params.channel_layout.nb_channels);
+
+	return VX_ERR_SUCCESS;
+}
+
 vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* filter_label, const char* args)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
@@ -86,62 +108,6 @@ vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const c
 	return VX_ERR_SUCCESS;
 }
 
-vx_error vx_get_filter_args(const vx_video* video, const enum AVMediaType type, int args_length, char* out_args)
-{
-	bool is_video = type == AVMEDIA_TYPE_VIDEO;
-
-	const AVStream* stream = is_video
-		? video->fmt_ctx->streams[video->video_stream]
-		: video->fmt_ctx->streams[video->audio_stream];
-
-	if (type == AVMEDIA_TYPE_VIDEO) {
-		// Set the correct pixel format, we need to find the format that a hardware frame will
-		// be converted to after transferring to system memory, but before converting via scaling
-		enum AVPixelFormat format = video->video_codec_ctx->pix_fmt;
-		if (video->hw_device_ctx)
-		{
-			format = vx_get_hw_pixel_format(video->hw_device_ctx);
-			if (!format) {
-				av_log(NULL, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
-				return VX_ERR_INIT_FILTER;
-			}
-		}
-
-		snprintf(
-			out_args,
-			args_length,
-			"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-			video->video_codec_ctx->width,
-			video->video_codec_ctx->height,
-			format,
-			stream->time_base.num,
-			stream->time_base.den,
-			video->video_codec_ctx->sample_aspect_ratio.num,
-			video->video_codec_ctx->sample_aspect_ratio.den);
-	}
-	else
-	{
-		if (video->audio_codec_ctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
-			av_channel_layout_default(&video->audio_codec_ctx->ch_layout, video->audio_codec_ctx->ch_layout.nb_channels);
-
-		char layout[100];
-		av_channel_layout_describe(&video->audio_codec_ctx->ch_layout, layout, sizeof(layout));
-
-		snprintf(
-			out_args,
-			args_length,
-			"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s:channels=%d",
-			stream->time_base.num,
-			stream->time_base.den,
-			video->audio_codec_ctx->sample_rate,
-			av_get_sample_fmt_name(video->audio_codec_ctx->sample_fmt),
-			layout,
-			video->audio_codec_ctx->ch_layout.nb_channels);
-	}
-
-	return VX_ERR_SUCCESS;
-}
-
 /// <summary>
 /// Set up a filter graph ready for filters to be added
 /// </summary>
@@ -154,6 +120,9 @@ vx_error vx_filtergraph_init(AVFilterGraph** filter_graph, enum AVMediaType type
 		av_log(NULL, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
 		goto cleanup;
 	}
+
+	if (*filter_graph)
+		avfilter_graph_free(filter_graph);
 
 	const char* buffer_source = type == AVMEDIA_TYPE_VIDEO
 		? "buffer"

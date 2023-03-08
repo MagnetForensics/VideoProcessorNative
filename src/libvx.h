@@ -95,6 +95,15 @@ struct vx_audio_params
 	bool transcribe;
 };
 
+struct av_video_params
+{
+	int width;
+	int height;
+	AVRational sample_aspect_ratio;
+	enum AVPixelFormat pixel_format;
+	AVRational time_base;
+};
+
 struct av_audio_params
 {
 	AVChannelLayout channel_layout;
