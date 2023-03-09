@@ -115,6 +115,9 @@ vx_error vx_filtergraph_init(AVFilterGraph** filter_graph, enum AVMediaType type
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	AVFilterContext* filter_source;
+	const char* buffer_source = type == AVMEDIA_TYPE_VIDEO
+		? "buffer"
+		: "abuffer";
 
 	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
 		av_log(NULL, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
@@ -123,10 +126,6 @@ vx_error vx_filtergraph_init(AVFilterGraph** filter_graph, enum AVMediaType type
 
 	if (*filter_graph)
 		avfilter_graph_free(filter_graph);
-
-	const char* buffer_source = type == AVMEDIA_TYPE_VIDEO
-		? "buffer"
-		: "abuffer";
 
 	*filter_graph = avfilter_graph_alloc();
 	if (!*filter_graph) {
