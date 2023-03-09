@@ -66,7 +66,8 @@ struct vx_frame
 	int width;
 	int height;
 	vx_pix_fmt pix_fmt;
-	int audio_sample_count;
+	int sample_count;
+	int max_samples;
 
 	vx_audio_info audio_info;
 	vx_scene_info scene_info;
@@ -1065,11 +1066,11 @@ static int vx_frame_init_audio_buffer(
 		vx_to_av_sample_fmt(out_params.sample_format),
 		0);
 
-	if (ret < 0) {
-		return -1;
-	}
+	frame->max_samples = sample_count;
 
-	return sample_count;
+	return  ret >= 0
+		? sample_count
+		: -1;
 }
 
 vx_error vx_frame_init_buffer(vx_frame* frame)
@@ -1153,7 +1154,7 @@ void* vx_frame_get_video_buffer(vx_frame* frame, int* out_buffer_size)
 
 void* vx_frame_get_audio_buffer(const vx_frame* frame, int* out_sample_count)
 {
-	*out_sample_count = frame->audio_sample_count;
+	*out_sample_count = frame->sample_count;
 
 	return frame->audio_buffer
 		? frame->audio_buffer[0]
@@ -1446,7 +1447,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 	struct av_audio_params params = vx_audio_params_from_frame(av_frame);
 	vx_audio_params out_params = video->options.audio_params;
 
-	int dst_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, params.sample_rate, AV_ROUND_UP);
+	int estimated_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, params.sample_rate, AV_ROUND_UP);
 
 	if (!av_audio_params_equal(initial_params, params))
 	{
@@ -1459,9 +1460,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 			initial_params.time_base.num, initial_params.time_base.den, params.time_base.num, params.time_base.den);
 
 		// Reinitialize resampler if audio format changes mid stream
-		int frame_samples = vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL);
-		// Sanity check to make sure the frame audio buffer can handle the expected number of samples
-		if (frame_samples <= 0 || frame_samples < dst_sample_count)
+		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL) <= 0)
 			return VX_ERR_RESAMPLE_AUDIO;
 		if (vx_init_audio_resampler(video, params, out_params) != VX_ERR_SUCCESS) {
 			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change.\n");
@@ -1469,13 +1468,18 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		}
 	}
 
-	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, dst_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
+	// Expand the frame audio buffer in case a frame has an unexpectedly high number of samples
+	if (frame->max_samples <= 0 || frame->max_samples < estimated_sample_count)
+		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, av_frame->nb_samples) <= 0)
+			return VX_ERR_RESAMPLE_AUDIO;
+
+	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, estimated_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
 
 	if (sample_count < 0) {
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
-	frame->audio_sample_count = dst_sample_count;
+	frame->sample_count = sample_count;
 
 	return VX_ERR_SUCCESS;
 }
