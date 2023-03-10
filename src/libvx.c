@@ -168,6 +168,14 @@ static bool vx_rectangle_is_initialized(vx_rectangle rect)
 	return (rect.x + rect.y + rect.width + rect.height) > 0;
 }
 
+static bool vx_rectangle_contains(vx_rectangle a, vx_rectangle b)
+{
+	return (b.x + b.width) <= (a.x + a.width)
+		&& (b.x) >= (a.x)
+		&& (b.y) >= (a.y)
+		&& (b.y + b.height) <= (a.y + a.height);
+}
+
 static double vx_timestamp_to_seconds(const vx_video* video, const int stream_type, const long long ts)
 {
 	return (double)ts * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
@@ -250,10 +258,15 @@ static vx_error vx_initialize_audiostats_filter(AVFilterContext** last_filter, c
 	return vx_insert_filter(last_filter, pad_index, "astats", NULL, args);
 }
 
-static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, vx_rectangle crop_area)
+static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, vx_rectangle frame_area, vx_rectangle crop_area)
 {
 	int result = VX_ERR_UNKNOWN;
 	char args[100];
+
+	if (crop_area.width <= 0 || crop_area.height <= 0 || !vx_rectangle_contains(frame_area, crop_area)) {
+		av_log(NULL, AV_LOG_FATAL, "The specified crop area is not valid for this video.");
+		return VX_ERR_INIT_FILTER;
+	}
 
 	snprintf(
 		args,
@@ -327,15 +340,17 @@ static vx_error vx_initialize_audio_filters(AVFilterContext** last_filter, const
 static vx_error vx_initialize_video_filters(const vx_video* video, AVFilterContext** last_filter, const int* pad_index)
 {
 	vx_error result = VX_ERR_SUCCESS;
-	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
+	const AVStream* stream = video->fmt_ctx->streams[video->video_stream];
 
 	if (video->options.autorotate)
-		if ((result = vx_initialize_rotation_filter(last_filter, pad_index, video_stream)) != VX_ERR_SUCCESS)
+		if ((result = vx_initialize_rotation_filter(last_filter, pad_index, stream)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
-	if (vx_rectangle_is_initialized(video->options.crop_area))
-		if ((result = vx_initialize_crop_filter(last_filter, pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
+	if (vx_rectangle_is_initialized(video->options.crop_area)) {
+		const vx_rectangle frame_area = { 0, 0, stream->codecpar->width, stream->codecpar->height };
+		if ((result = vx_initialize_crop_filter(last_filter, pad_index, frame_area, video->options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
+	}
 
 	if (video->options.scene_threshold >= 0)
 		if ((result = vx_initialize_scene_filter(last_filter, pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
