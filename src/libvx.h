@@ -8,6 +8,8 @@ extern "C" {
 #define VX_DECLSPEC __declspec(dllexport)
 #define VX_CDECL __cdecl
 
+#define FRAME_QUEUE_SIZE 32
+
 typedef struct vx_video vx_video;
 typedef struct vx_audio_params vx_audio_params;
 typedef struct vx_video_options vx_video_options;
@@ -76,6 +78,75 @@ typedef enum {
 	VX_HW_ACCEL_HEVC		= 1 << 5,
 	VX_HW_ACCEL_H264		= 1 << 6
 } vx_hwaccel_flag;
+
+struct vx_rectangle
+{
+	int x;
+	int y;
+	int width;
+	int height;
+};
+
+struct vx_audio_params
+{
+	int channels;
+	vx_sample_fmt sample_format;
+	int sample_rate;
+};
+
+struct av_video_params
+{
+	int width;
+	int height;
+	AVRational sample_aspect_ratio;
+	enum AVPixelFormat pixel_format;
+	AVRational time_base;
+};
+
+struct av_audio_params
+{
+	AVChannelLayout channel_layout;
+	enum AVSampleFormat sample_format;
+	int sample_rate;
+	AVRational time_base;
+};
+
+struct vx_video_options
+{
+	vx_audio_params audio_params;
+	bool autorotate;
+	vx_rectangle crop_area;
+	vx_hwaccel_flag hw_criteria;
+	float scene_threshold;
+};
+
+struct vx_video
+{
+	AVFormatContext* fmt_ctx;
+	AVCodecContext* video_codec_ctx;
+	AVCodecContext* audio_codec_ctx;
+	AVBufferRef* hw_device_ctx;
+
+	struct SwrContext* swr_ctx;
+
+	enum AVPixelFormat hw_pix_fmt;
+	struct av_audio_params inital_audio_params;
+
+	AVFilterGraph* filter_pipeline;
+	AVFilterGraph* filter_pipeline_audio;
+
+	int video_stream;
+	int audio_stream;
+
+	long frame_count;
+	int frame_queue_count;
+	AVFrame* frame_queue[FRAME_QUEUE_SIZE];
+
+	vx_video_options options;
+
+	double ts_last;
+	int64_t ts_offset;
+};
 
 typedef void (*vx_log_callback)(const char* message, int level);
 

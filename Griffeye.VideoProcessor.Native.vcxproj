@@ -153,9 +153,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="src\filtergraph.h" />
     <ClInclude Include="src\libvx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\filtergraph.c" />
     <ClCompile Include="src\libvx.c" />
   </ItemGroup>
   <ItemGroup>
