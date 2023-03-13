@@ -16,7 +16,7 @@
 
 #include "libvx.h"
 #include "util.h"
-#include "filters.h"
+#include "filter.h"
 #include "filtergraph.h"
 
 #ifdef __cplusplus

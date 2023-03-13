@@ -21,7 +21,7 @@
     <ClInclude Include="src\filtergraph.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\filters.h">
+    <ClInclude Include="src\filter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\util.h">
@@ -35,7 +35,7 @@
     <ClCompile Include="src\filtergraph.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\filters.c">
+    <ClCompile Include="src\filter.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\util.c">

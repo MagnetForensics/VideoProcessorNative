@@ -1,5 +1,5 @@
-#ifndef LIBVX_FILTERS_H
-#define LIBVX_FILTERS_H
+#ifndef LIBVX_FILTER_H
+#define LIBVX_FILTER_H
 
 #ifdef __cplusplus
 extern "C" {

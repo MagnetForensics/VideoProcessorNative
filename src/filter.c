@@ -11,7 +11,7 @@
 
 #include "libvx.h"
 #include "util.h"
-#include "filters.h"
+#include "filter.h"
 #include "filtergraph.h"
 
 static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
