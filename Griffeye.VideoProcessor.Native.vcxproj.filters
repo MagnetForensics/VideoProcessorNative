@@ -18,7 +18,10 @@
     <ClInclude Include="src\libvx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="filtergraph.h">
+    <ClInclude Include="src\filtergraph.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\filters.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -26,7 +29,10 @@
     <ClCompile Include="src\libvx.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="filtergraph.c">
+    <ClCompile Include="src\filtergraph.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\filters.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

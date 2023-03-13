@@ -1,91 +1,14 @@
 #include <stdlib.h>
 #include <stdbool.h>
-#include <assert.h>
-#include <string.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/display.h>
-#include <libavutil/imgutils.h>
-#include <libavutil/pixfmt.h>
 
 #include "libvx.h"
 #include "filtergraph.h"
-
-vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform, char** out_transform_args)
-{
-	vx_error result = VX_ERR_UNKNOWN;
-
-	uint8_t* displaymatrix = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX, NULL);
-
-	if (displaymatrix) {
-		double theta = av_display_rotation_get((int32_t*)displaymatrix);
-
-		if (theta < -135 || theta > 135) {
-			*out_transform = "vflip,hflip";
-			*out_transform_args = NULL;
-		}
-		else if (theta < -45) {
-			*out_transform = "transpose";
-			*out_transform_args = "dir=clock";
-		}
-		else if (theta > 45) {
-			*out_transform = "transpose";
-			*out_transform_args = "dir=cclock";
-		}
-
-		result = VX_ERR_SUCCESS;
-	}
-	else {
-		result = VX_ERR_STREAM_INFO;
-	}
-
-	return result;
-}
-
-vx_error vx_get_video_filter_args(struct av_video_params params, int args_length, char* out_args)
-{
-	snprintf(
-		out_args,
-		args_length,
-		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-		params.width,
-		params.height,
-		params.pixel_format,
-		params.time_base.num,
-		params.time_base.den,
-		params.sample_aspect_ratio.num,
-		params.sample_aspect_ratio.den);
-
-	return VX_ERR_SUCCESS;
-}
-
-vx_error vx_get_audio_filter_args(struct av_audio_params params, int args_length, char* out_args)
-{
-	char layout[100];
-
-	if (params.channel_layout.order == AV_CHANNEL_ORDER_UNSPEC)
-		av_channel_layout_default(&params.channel_layout, params.channel_layout.nb_channels);
-
-	av_channel_layout_describe(&params.channel_layout, layout, sizeof(layout));
-
-	snprintf(
-		out_args,
-		args_length,
-		"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s:channels=%d",
-		params.time_base.num,
-		params.time_base.den,
-		params.sample_rate,
-		av_get_sample_fmt_name(params.sample_format),
-		layout,
-		params.channel_layout.nb_channels);
-
-	return VX_ERR_SUCCESS;
-}
 
 vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, const char* filter_name, const char* filter_label, const char* args)
 {
