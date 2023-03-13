@@ -1,17 +1,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
-#include <assert.h>
 #include <string.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
-#include <libavutil/channel_layout.h>
 #include <libavutil/display.h>
-#include <libavutil/imgutils.h>
-#include <libavutil/pixfmt.h>
 
 #include "libvx.h"
 #include "filters.h"

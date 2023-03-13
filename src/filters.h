@@ -1,8 +1,6 @@
 #ifndef LIBVX_FILTERS_H
 #define LIBVX_FILTERS_H
 
-#include "libvx.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
