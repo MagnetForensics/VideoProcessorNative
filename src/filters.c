@@ -130,6 +130,64 @@ static vx_error vx_get_audio_filter_args(struct av_audio_params params, int args
 
 	return VX_ERR_SUCCESS;
 }
+
+vx_error vx_get_filter_args_from_codec(const AVCodecContext* codec, int args_length, char* out_args)
+{
+	vx_error result = VX_ERR_SUCCESS;
+
+	if (codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+		// Set the correct pixel format, we need to find the format that a hardware frame will
+		// be converted to after transferring to a software frame, but before converting via scaling
+		enum AVPixelFormat format = codec->pix_fmt;
+		if (codec->hw_device_ctx)
+		{
+			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
+			if (!format) {
+				av_log(codec, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
+				return VX_ERR_INIT_FILTER;
+			}
+		}
+
+		struct av_video_params params = {
+			.width = codec->width,
+			.height = codec->height,
+			.sample_aspect_ratio = codec->sample_aspect_ratio,
+			.pixel_format = format,
+			.time_base = codec->time_base
+		};
+		result = vx_get_video_filter_args(params, args_length, out_args);
+	}
+	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+		struct av_audio_params params = vx_audio_params_from_codec(codec);
+
+		result = vx_get_audio_filter_args(params, args_length, out_args);
+	}
+	else {
+		result = VX_ERR_INIT_FILTER;
+	}
+
+	return result;
+}
+
+static vx_error vx_get_filter_args(const AVCodecContext* codec, void* params, int args_length, char* out_args)
+{
+	vx_error result = VX_ERR_INIT_FILTER;
+
+	if (params) {
+		if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+			result = vx_get_audio_filter_args(*(struct av_audio_params*)params, args_length, out_args);
+		}
+		else if (codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+			result = vx_get_video_filter_args(*(struct av_video_params*)params, args_length, out_args);
+		}
+	}
+	else {
+		result = vx_get_filter_args_from_codec(codec, args_length, out_args);
+	}
+
+	return result;
+}
+
 static vx_error vx_initialize_audiostats_filter(AVFilterContext** last_filter, const int* pad_index)
 {
 	char args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak:measure_perchannel=0";
@@ -238,44 +296,6 @@ cleanup:
 	return result;
 }
 
-vx_error vx_get_filter_args(const AVCodecContext* codec, int args_length, char* out_args)
-{
-	vx_error result = VX_ERR_SUCCESS;
-
-	if (codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-		// Set the correct pixel format, we need to find the format that a hardware frame will
-		// be converted to after transferring to a software frame, but before converting via scaling
-		enum AVPixelFormat format = codec->pix_fmt;
-		if (codec->hw_device_ctx)
-		{
-			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
-			if (!format) {
-				av_log(codec, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
-				return VX_ERR_INIT_FILTER;
-			}
-		}
-
-		struct av_video_params params = {
-			.width = codec->width,
-			.height = codec->height,
-			.sample_aspect_ratio = codec->sample_aspect_ratio,
-			.pixel_format = format,
-			.time_base = codec->time_base
-		};
-		result = vx_get_video_filter_args(params, args_length, out_args);
-	}
-	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-		struct av_audio_params params = vx_audio_params_from_codec(codec);
-
-		result = vx_get_audio_filter_args(params, args_length, out_args);
-	}
-	else {
-		result = VX_ERR_INIT_FILTER;
-	}
-
-	return result;
-}
-
 /// <summary>
 /// Set up the filter pipeline for either an audio or video stream.
 /// Optionally specify the stream parameters as av_audio_params or av_video_params.
@@ -301,20 +321,8 @@ vx_error vx_initialize_filtergraph(const vx_video* video, const enum AVMediaType
 		: video->audio_codec_ctx;
 	const AVStream* stream = video->fmt_ctx->streams[is_video ? video->video_stream : video->audio_stream];
 
-	if (params) {
-		if (is_video) {
-			if (vx_get_video_filter_args(*(struct av_video_params*)params, sizeof(args), &args) != VX_ERR_SUCCESS)
-				return VX_ERR_INIT_FILTER;
-		}
-		else {
-			if (vx_get_audio_filter_args(*(struct av_audio_params*)params, sizeof(args), &args) != VX_ERR_SUCCESS)
-				return VX_ERR_INIT_FILTER;
-		}
-	}
-	else {
-		if (vx_get_filter_args(codec, sizeof(args), &args) != VX_ERR_SUCCESS)
-			return VX_ERR_INIT_FILTER;
-	}
+	if ((result = vx_get_filter_args(codec, params, sizeof(args), &args)) != VX_ERR_SUCCESS)
+		return result;
 
 	// Create the pipeline
 	if ((result = vx_filtergraph_init(filter_graph, type, &args)) != VX_ERR_SUCCESS || !*filter_graph)
