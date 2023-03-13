@@ -4,37 +4,15 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
 #include <libavformat/avformat.h>
 #include <libavutil/display.h>
 
 #include "libvx.h"
+#include "util.h"
 #include "filters.h"
 #include "filtergraph.h"
-
-static struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* context)
-{
-	struct av_audio_params params = {
-		.channel_layout = context->ch_layout,
-		.sample_format = context->sample_fmt,
-		.sample_rate = context->sample_rate,
-		.time_base = context->time_base
-	};
-
-	return params;
-}
-
-static bool vx_rectangle_is_initialized(vx_rectangle rect)
-{
-	return (rect.x + rect.y + rect.width + rect.height) > 0;
-}
-
-static bool vx_rectangle_contains(vx_rectangle a, vx_rectangle b)
-{
-	return (b.x + b.width) <= (a.x + a.width)
-		&& (b.x) >= (a.x)
-		&& (b.y) >= (a.y)
-		&& (b.y + b.height) <= (a.y + a.height);
-}
 
 static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
 {
@@ -186,7 +164,7 @@ static vx_error vx_initialize_audiostats_filter(AVFilterContext** last_filter, c
 {
 	char args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak:measure_perchannel=0";
 
-	return vx_insert_filter(last_filter, pad_index, "astats", NULL, args);
+	return vx_filtergraph_insert_filter(last_filter, pad_index, "astats", NULL, args);
 }
 
 static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, vx_rectangle frame_area, vx_rectangle crop_area)
@@ -209,7 +187,7 @@ static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const i
 		crop_area.y);
 
 	if (args) {
-		if ((result = vx_insert_filter(last_filter, pad_index, "crop", NULL, args)) != VX_ERR_SUCCESS)
+		if ((result = vx_filtergraph_insert_filter(last_filter, pad_index, "crop", NULL, args)) != VX_ERR_SUCCESS)
 			return result;
 	}
 
@@ -224,7 +202,7 @@ static vx_error vx_initialize_scene_filter(AVFilterContext** last_filter, const 
 	snprintf(args, sizeof(args), "threshold=%f", threshold);
 
 	if (args) {
-		if ((result = vx_insert_filter(last_filter, pad_index, "scdet", NULL, args)) != VX_ERR_SUCCESS)
+		if ((result = vx_filtergraph_insert_filter(last_filter, pad_index, "scdet", NULL, args)) != VX_ERR_SUCCESS)
 			return result;
 	}
 
@@ -253,7 +231,7 @@ static vx_error vx_initialize_rotation_filter(AVFilterContext** last_filter, con
 		token = strtok(src, ",");
 
 		while (token) {
-			if (vx_insert_filter(last_filter, pad_index, token, NULL, args) != VX_ERR_SUCCESS)
+			if (vx_filtergraph_insert_filter(last_filter, pad_index, token, NULL, args) != VX_ERR_SUCCESS)
 				break;
 			token = strtok(NULL, ",");
 		}
@@ -318,6 +296,9 @@ vx_error vx_initialize_filtergraph(const vx_video* video, const enum AVMediaType
 	if ((result = vx_get_filter_args(codec, params, sizeof(args), &args)) != VX_ERR_SUCCESS)
 		return result;
 
+	if (*filter_graph)
+		avfilter_graph_free(filter_graph);
+
 	// Create the pipeline
 	if ((result = vx_filtergraph_init(filter_graph, type, &args)) != VX_ERR_SUCCESS || !*filter_graph)
 		goto cleanup;
@@ -346,5 +327,51 @@ cleanup:
 			avfilter_graph_free(filter_graph);
 	}
 
+	return result;
+}
+
+vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AVMediaType type)
+{
+	vx_error result = VX_ERR_SUCCESS;
+	AVFilterGraph** filter_graph = type == AVMEDIA_TYPE_VIDEO
+		? &video->filter_pipeline
+		: &video->filter_pipeline_audio;
+	void* params = NULL;
+
+	if (*filter_graph && (*filter_graph)->nb_filters > 1) {
+		const AVFilterLink* filter_source = avfilter_graph_get_filter(*filter_graph, "in")->outputs[0];
+
+		if (type == AVMEDIA_TYPE_AUDIO) {
+			// Reinitialize the pipeline if the audio properties have changed
+			const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(av_frame);
+			const struct av_audio_params filter_audio_params = {
+				.channel_layout = filter_source->ch_layout,
+				.sample_format = filter_source->format,
+				.sample_rate = filter_source->sample_rate,
+				.time_base = filter_source->time_base
+			};
+
+			if (!av_audio_params_equal(filter_audio_params, frame_audio_params))
+				params = &frame_audio_params;
+		}
+		else if (type == AVMEDIA_TYPE_VIDEO) {
+			// Reinitialize the pipeline if the frame size has changed
+			struct av_video_params frame_params = vx_video_params_from_frame(av_frame);
+
+			if (filter_source->w != av_frame->width || filter_source->h != av_frame->height)
+				params = &frame_params;
+		}
+
+		// Reinitialize the pipeline if the current audio or video properties have changed
+		// from those used to initialize the filter graph
+		if (params) {
+			if ((result = vx_initialize_filtergraph(video, type, params) != VX_ERR_SUCCESS))
+				goto cleanup;
+		}
+
+		result = vx_filtergraph_process_frame(filter_graph, av_frame);
+	}
+
+cleanup:
 	return result;
 }

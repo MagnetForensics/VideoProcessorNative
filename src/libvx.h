@@ -132,8 +132,8 @@ struct vx_video
 	enum AVPixelFormat hw_pix_fmt;
 	struct av_audio_params inital_audio_params;
 
-	AVFilterGraph* filter_pipeline;
-	AVFilterGraph* filter_pipeline_audio;
+	struct AVFilterGraph* filter_pipeline;
+	struct AVFilterGraph* filter_pipeline_audio;
 
 	int video_stream;
 	int audio_stream;

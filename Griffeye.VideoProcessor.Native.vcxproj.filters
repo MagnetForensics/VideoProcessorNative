@@ -24,6 +24,9 @@
     <ClInclude Include="src\filters.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\libvx.c">
@@ -33,6 +36,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\filters.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
