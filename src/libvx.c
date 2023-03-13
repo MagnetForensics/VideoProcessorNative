@@ -23,12 +23,6 @@
 #pragma error
 #endif
 
-#ifdef DEBUG
-#define dprintf(...) { printf("%s:%d %-30s ", __FILE__, __LINE__, __func__); printf(__VA_ARGS__); }
-#else
-#define dprintf(...)
-#endif
-
 #define FRAME_BUFFER_PADDING 4096
 #define LOG_TRACE_BUFSIZE 4096
 
@@ -205,7 +199,7 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 
 			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
-				dprintf("found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
+				av_log(NULL, AV_LOG_INFO, "Found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
 				return config;
 			}
 
@@ -223,7 +217,7 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 
 	if ((err = av_hwdevice_ctx_create(&me->hw_device_ctx, type, NULL, NULL, 0)) < 0)
 	{
-		dprintf("Failed to create specified HW device.\n");
+		av_log(NULL, AV_LOG_INFO, "Failed to create specified HW device.\n");
 		return err;
 	}
 
@@ -462,7 +456,7 @@ static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream
 			if (fp <= last_fp)
 				fp = last_fp + 100 * (int64_t)i;
 
-			dprintf("retry: @%" PRId64 "\n", fp);
+			av_log(NULL, AV_LOG_DEBUG, "Seeking forward in stream, position: @%" PRId64 "\n", fp);
 			avformat_seek_file(fmt_ctx, stream, fp + 100, fp + 512, fp + 1024 * 1024, AVSEEK_FLAG_BYTE | AVSEEK_FLAG_ANY);
 
 			last_fp = fp;
