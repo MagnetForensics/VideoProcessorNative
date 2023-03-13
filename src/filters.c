@@ -216,30 +216,29 @@ static vx_error vx_initialize_audio_filters(AVFilterContext** last_filter, const
 	return vx_initialize_audiostats_filter(last_filter, pad_index);
 }
 
-static vx_error vx_initialize_video_filters(const vx_video* video, AVFilterContext** last_filter, const int* pad_index)
+static vx_error vx_initialize_video_filters(AVFilterContext** last_filter, const int* pad_index, const AVStream* stream, const vx_video_options options)
 {
 	vx_error result = VX_ERR_SUCCESS;
-	const AVStream* stream = video->fmt_ctx->streams[video->video_stream];
 
-	if (video->options.autorotate)
+	if (options.autorotate)
 		if ((result = vx_initialize_rotation_filter(last_filter, pad_index, stream)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
-	if (vx_rectangle_is_initialized(video->options.crop_area)) {
+	if (vx_rectangle_is_initialized(options.crop_area)) {
 		const vx_rectangle frame_area = { 0, 0, stream->codecpar->width, stream->codecpar->height };
-		if ((result = vx_initialize_crop_filter(last_filter, pad_index, frame_area, video->options.crop_area)) != VX_ERR_SUCCESS)
+		if ((result = vx_initialize_crop_filter(last_filter, pad_index, frame_area, options.crop_area)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
-	if (video->options.scene_threshold >= 0)
-		if ((result = vx_initialize_scene_filter(last_filter, pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
+	if (options.scene_threshold >= 0)
+		if ((result = vx_initialize_scene_filter(last_filter, pad_index, options.scene_threshold)) != VX_ERR_SUCCESS)
 			goto cleanup;
 
 cleanup:
 	return result;
 }
 
-vx_error vx_get_filter_args(const AVCodecContext* codec, AVRational time_base, int args_length, char* out_args)
+vx_error vx_get_filter_args(const AVCodecContext* codec, int args_length, char* out_args)
 {
 	vx_error result = VX_ERR_SUCCESS;
 
@@ -261,13 +260,12 @@ vx_error vx_get_filter_args(const AVCodecContext* codec, AVRational time_base, i
 			.height = codec->height,
 			.sample_aspect_ratio = codec->sample_aspect_ratio,
 			.pixel_format = format,
-			.time_base = time_base
+			.time_base = codec->time_base
 		};
 		result = vx_get_video_filter_args(params, args_length, out_args);
 	}
 	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
 		struct av_audio_params params = vx_audio_params_from_codec(codec);
-		params.time_base = time_base;
 
 		result = vx_get_audio_filter_args(params, args_length, out_args);
 	}
@@ -282,7 +280,7 @@ vx_error vx_get_filter_args(const AVCodecContext* codec, AVRational time_base, i
 /// Set up the filter pipeline for either an audio or video stream.
 /// Optionally specify the stream parameters as av_audio_params or av_video_params.
 /// </summary>
-vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMediaType type, void* params)
+vx_error vx_initialize_filtergraph(const vx_video* video, const enum AVMediaType type, void* params)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 	bool is_video = type == AVMEDIA_TYPE_VIDEO;
@@ -303,9 +301,6 @@ vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMediaType
 		: video->audio_codec_ctx;
 	const AVStream* stream = video->fmt_ctx->streams[is_video ? video->video_stream : video->audio_stream];
 
-	if (*filter_graph)
-		avfilter_graph_free(filter_graph);
-
 	if (params) {
 		if (is_video) {
 			if (vx_get_video_filter_args(*(struct av_video_params*)params, sizeof(args), &args) != VX_ERR_SUCCESS)
@@ -317,20 +312,19 @@ vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMediaType
 		}
 	}
 	else {
-		if (vx_get_filter_args(codec, stream->time_base, sizeof(args), &args) != VX_ERR_SUCCESS)
+		if (vx_get_filter_args(codec, sizeof(args), &args) != VX_ERR_SUCCESS)
 			return VX_ERR_INIT_FILTER;
 	}
 
 	// Create the pipeline
-	if ((result = vx_filtergraph_init(filter_graph, type, &args)) != VX_ERR_SUCCESS)
+	if ((result = vx_filtergraph_init(filter_graph, type, &args)) != VX_ERR_SUCCESS || !*filter_graph)
 		goto cleanup;
 
-	if ((*filter_graph)->nb_filters > 0)
-		last_filter = (*filter_graph)->filters[(*filter_graph)->nb_filters - 1];
+	last_filter = (*filter_graph)->filters[(*filter_graph)->nb_filters - 1];
 
 	// Add filters
 	if (is_video) {
-		if ((result = vx_initialize_video_filters(video, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+		if ((result = vx_initialize_video_filters(&last_filter, &pad_index, stream, video->options)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 	else {

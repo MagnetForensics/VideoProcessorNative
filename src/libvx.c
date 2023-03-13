@@ -359,6 +359,9 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
+	// Set the time base for current stream so it can be read elsewhere
+	(*out_codec_ctx)->time_base = me->fmt_ctx->streams[*out_stream]->time_base;
+
 	return true;
 }
 
@@ -460,7 +463,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->video_codec_ctx->pix_fmt != AV_PIX_FMT_NONE) {
-		if ((error = vx_create_filter_pipeline(me, AVMEDIA_TYPE_VIDEO, NULL)) != VX_ERR_SUCCESS)
+		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_VIDEO, NULL)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
@@ -471,7 +474,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			goto cleanup;
 		}
 
-		if ((error = vx_create_filter_pipeline(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
+		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
@@ -991,7 +994,7 @@ static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
 		frame_params.time_base = video->fmt_ctx->streams[video->video_stream]->time_base; // Time base on frame is not accurate
 		if (filter_source->outputs[0]->w != av_frame->width || filter_source->outputs[0]->h != av_frame->height) {
 			avfilter_graph_free(&video->filter_pipeline);
-			if ((result = vx_create_filter_pipeline(video, AVMEDIA_TYPE_VIDEO, &frame_params) != VX_ERR_SUCCESS))
+			if ((result = vx_initialize_filtergraph(video, AVMEDIA_TYPE_VIDEO, &frame_params) != VX_ERR_SUCCESS))
 				return result;
 
 			filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
@@ -1045,7 +1048,7 @@ static vx_error vx_filter_audio_frame(const vx_video* video, AVFrame* av_frame)
 			.time_base = filter_source->outputs[0]->time_base
 		};
 		if (!av_audio_params_equal(frame_audio_params, filter_audio_params)) {
-			if ((result = vx_create_filter_pipeline(video, AVMEDIA_TYPE_AUDIO, &frame_audio_params) != VX_ERR_SUCCESS))
+			if ((result = vx_initialize_filtergraph(video, AVMEDIA_TYPE_AUDIO, &frame_audio_params) != VX_ERR_SUCCESS))
 				return result;
 
 			filter_source = avfilter_graph_get_filter(video->filter_pipeline_audio, "in");
