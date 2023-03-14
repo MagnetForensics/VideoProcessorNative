@@ -280,9 +280,6 @@ static bool find_stream_and_open_codec(
 		return false;
 	}
 
-	// Set the time base for current stream so it can be read elsewhere
-	(*out_codec_ctx)->time_base = me->fmt_ctx->streams[*out_stream]->time_base;
-
 	return true;
 }
 
@@ -847,10 +844,6 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 		}
 		else {
 			if (frame_count < FRAME_QUEUE_SIZE) {
-				// Time base is not always set, but is needed later
-				if (frame->time_base.num == 0 && frame->time_base.den == 1)
-					frame->time_base = codec_ctx->time_base;
-
 				out_frame_buffer[frame_count++] = frame;
 			}
 			else {

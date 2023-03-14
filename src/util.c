@@ -39,13 +39,13 @@ bool vx_rectangle_contains(vx_rectangle a, vx_rectangle b)
 		&& (b.y + b.height) <= (a.y + a.height);
 }
 
-struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* context)
+struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* codec)
 {
 	struct av_audio_params params = {
-		.channel_layout = context->ch_layout,
-		.sample_format = context->sample_fmt,
-		.sample_rate = context->sample_rate,
-		.time_base = context->time_base
+		.channel_layout = codec->ch_layout,
+		.sample_format = codec->sample_fmt,
+		.sample_rate = codec->sample_rate,
+		.time_base = codec->time_base
 	};
 
 	return params;
