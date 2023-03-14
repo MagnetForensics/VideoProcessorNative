@@ -23,7 +23,7 @@ vx_error vx_filtergraph_init(AVFilterGraph** filter_graph, enum AVMediaType type
 		: "abuffer";
 
 	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
-		av_log(*filter_graph, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
+		av_log(NULL, AV_LOG_ERROR, "Cannot create filter graph for %s media type\n", av_get_media_type_string(type));
 		goto cleanup;
 	}
 
@@ -35,7 +35,7 @@ vx_error vx_filtergraph_init(AVFilterGraph** filter_graph, enum AVMediaType type
 
 	// Create the filter pipeline source
 	if (avfilter_graph_create_filter(&filter_source, avfilter_get_by_name(buffer_source), "in", args, NULL, *filter_graph) < 0) {
-		av_log(filter_source, AV_LOG_ERROR, "Cannot create buffer source\n");
+		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
 		goto cleanup;
 	}
 
@@ -48,16 +48,16 @@ cleanup:
 /// <summary>
 /// Complete the setup of a filter graph once filters have been added
 /// </summary>
-vx_error vx_filtergraph_configure(AVFilterGraph** filter_graph, enum AVMediaType mediaType, AVFilterContext** last_filter, int* pad_index)
+vx_error vx_filtergraph_configure(AVFilterGraph** filter_graph, enum AVMediaType type, AVFilterContext** last_filter, int* pad_index)
 {
 	vx_error result = VX_ERR_INIT_FILTER;
 
-	if (mediaType != AVMEDIA_TYPE_VIDEO && mediaType != AVMEDIA_TYPE_AUDIO) {
-		av_log(*filter_graph, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
+	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot create filter graph for %s media type\n", av_get_media_type_string(type));
 		goto cleanup;
 	}
 
-	const char* buffer_sink = mediaType == AVMEDIA_TYPE_VIDEO
+	const char* buffer_sink = type == AVMEDIA_TYPE_VIDEO
 		? "buffersink"
 		: "abuffersink";
 
@@ -66,7 +66,7 @@ vx_error vx_filtergraph_configure(AVFilterGraph** filter_graph, enum AVMediaType
 
 	// Finally, construct the filter graph using all the linked nodes
 	if (avfilter_graph_config(*filter_graph, NULL) < 0) {
-		av_log(*filter_graph, AV_LOG_ERROR, "Could not configure filter graph\n");
+		av_log(NULL, AV_LOG_ERROR, "Could not configure filter graph\n");
 		result = VX_ERR_INIT_FILTER;
 	}
 

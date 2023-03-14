@@ -218,7 +218,7 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 
 	if ((err = av_hwdevice_ctx_create(&me->hw_device_ctx, type, NULL, NULL, 0)) < 0)
 	{
-		av_log(NULL, AV_LOG_INFO, "Failed to create specified HW device.\n");
+		av_log(NULL, AV_LOG_INFO, "Failed to create %s HW device\n", av_hwdevice_get_type_name(type));
 		return err;
 	}
 
@@ -821,7 +821,7 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 	if (vx_is_packet_error(result)) {
 		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
 		if (av_strerror(result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
-			av_log(packet, AV_LOG_ERROR, "Unable to decode packet: %s\n", error_message);
+			av_log(NULL, AV_LOG_ERROR, "Unable to decode packet: %s\n", error_message);
 
 		ret = VX_ERR_DECODE_VIDEO;
 		goto cleanup;
@@ -965,7 +965,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL) <= 0)
 			return VX_ERR_RESAMPLE_AUDIO;
 		if (vx_init_audio_resampler(video, params, out_params) != VX_ERR_SUCCESS) {
-			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change.\n");
+			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change\n");
 			return VX_ERR_ALLOCATE;
 		}
 	}
@@ -1222,7 +1222,7 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		}
 	}
 	else {
-		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data and the buffer could not be transferred.\n");
+		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data so the buffer could not be transferred\n");
 	}
 
 	// Frame properties that may have been updated after filtering

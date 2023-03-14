@@ -115,7 +115,7 @@ vx_error vx_get_filter_args_from_codec(const AVCodecContext* codec, int args_len
 		{
 			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
 			if (!format) {
-				av_log(codec, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
+				av_log(codec, AV_LOG_ERROR, "Cannot find compatible hardware pixel format\n");
 				return VX_ERR_INIT_FILTER;
 			}
 		}
@@ -173,7 +173,7 @@ static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const i
 	char args[100];
 
 	if (crop_area.width <= 0 || crop_area.height <= 0 || !vx_rectangle_contains(frame_area, crop_area)) {
-		av_log(NULL, AV_LOG_FATAL, "The specified crop area is not valid for this video.");
+		av_log(NULL, AV_LOG_FATAL, "The specified crop area is not valid for this video.\n");
 		return VX_ERR_INIT_FILTER;
 	}
 
@@ -281,7 +281,7 @@ vx_error vx_initialize_filtergraph(const vx_video* video, const enum AVMediaType
 	int pad_index = 0;
 
 	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
+		av_log(NULL, AV_LOG_ERROR, "Cannot create filter graph for %s media type\n", av_get_media_type_string(type));
 		goto cleanup;
 	}
 
