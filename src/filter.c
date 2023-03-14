@@ -343,7 +343,9 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 
 		if (type == AVMEDIA_TYPE_AUDIO) {
 			// Reinitialize the pipeline if the audio properties have changed
-			const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(av_frame);
+			const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(
+				av_frame,
+				&video->fmt_ctx->streams[video->audio_stream]->time_base);
 			const struct av_audio_params filter_audio_params = {
 				.channel_layout = filter_source->ch_layout,
 				.sample_format = filter_source->format,
@@ -356,13 +358,9 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 		}
 		else if (type == AVMEDIA_TYPE_VIDEO) {
 			// Reinitialize the pipeline if the frame size has changed
-			struct av_video_params frame_params = vx_video_params_from_frame(av_frame);
+			struct av_video_params frame_params = vx_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
 
 			if (filter_source->w != av_frame->width || filter_source->h != av_frame->height) {
-
-				// Time base is not always correctly initialized
-				if (av_frame->time_base.num == 0 && av_frame->time_base.den == 1)
-					frame_params.time_base = video->fmt_ctx->streams[video->video_stream]->time_base;
 
 				params = &frame_params;
 			}

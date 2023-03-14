@@ -12,6 +12,11 @@ bool vx_is_packet_error(int result)
 	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
 }
 
+static bool vx_is_rational_initialized(AVRational rational)
+{
+	return rational.num != 0 && rational.den != 1;
+}
+
 enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
 {
 	enum AVPixelFormat formats[] = { AV_PIX_FMT_RGB24, AV_PIX_FMT_GRAY8, AV_PIX_FMT_BGRA };
@@ -51,13 +56,21 @@ struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* codec)
 	return params;
 }
 
-struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame)
+/// <summary>
+/// Audio parameters from a frame. Optionally provide a backup time base to use
+/// in case the value is not set on the frame.
+/// </summary>
+struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base)
 {
+	const AVRational time_base_corrected = time_base && !vx_is_rational_initialized(frame->time_base)
+		? *time_base
+		: frame->time_base;
+
 	struct av_audio_params params = {
 		.channel_layout = frame->ch_layout,
 		.sample_format = frame->format,
 		.sample_rate = frame->sample_rate,
-		.time_base = frame->time_base
+		.time_base = time_base_corrected
 	};
 
 	return params;
@@ -72,14 +85,22 @@ bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio
 		&& a.time_base.num == b.time_base.num;
 }
 
-struct av_video_params vx_video_params_from_frame(const AVFrame* frame)
+/// <summary>
+/// Video parameters from a frame. Optionally provide a backup time base to use
+/// in case the value is not set on the frame.
+/// </summary>
+struct av_video_params vx_video_params_from_frame(const AVFrame* frame, const AVRational* time_base)
 {
+	const AVRational time_base_corrected = time_base && !vx_is_rational_initialized(frame->time_base)
+		? *time_base
+		: frame->time_base;
+
 	struct av_video_params params = {
 		.width = frame->width,
 		.height = frame->height,
 		.pixel_format = frame->format,
 		.sample_aspect_ratio = frame->sample_aspect_ratio,
-		.time_base = frame->time_base
+		.time_base = time_base_corrected
 	};
 
 	return params;
