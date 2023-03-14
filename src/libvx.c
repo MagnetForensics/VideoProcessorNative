@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <libavcodec/avcodec.h>
+#include <libavfilter/avfilter.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
@@ -414,6 +415,9 @@ void vx_close(vx_video* video)
 
 	if (video->filter_pipeline)
 		avfilter_graph_free(&video->filter_pipeline);
+
+	if (video->filter_pipeline_audio)
+		avfilter_graph_free(&video->filter_pipeline_audio);
 
 	if (video->swr_ctx)
 		swr_free(&video->swr_ctx);
@@ -843,6 +847,10 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 		}
 		else {
 			if (frame_count < FRAME_QUEUE_SIZE) {
+				// Time base is not always set, but is needed later
+				if (frame->time_base.num == 0 && frame->time_base.den == 1)
+					frame->time_base = codec_ctx->time_base;
+
 				out_frame_buffer[frame_count++] = frame;
 			}
 			else {
@@ -1188,7 +1196,7 @@ end:
 
 vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 {
-	vx_error ret = VX_ERR_UNKNOWN;
+	vx_error ret = VX_ERR_SUCCESS;
 	AVFrame* av_frame = NULL;
 
 	if (video->frame_queue_count <= 0)
@@ -1197,7 +1205,10 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	// Get the first item from the queue, but do not dequeue
 	av_frame = vx_get_first_queue_item(video);
 	if (!av_frame)
+	{
+		ret = VX_ERR_UNKNOWN;
 		goto cleanup;
+	}
 
 	// Run the frame through the filter pipeline, if any
 	if (vx_frame_has_image(av_frame)) {
@@ -1215,18 +1226,11 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 
 	// Frame properties that may have been updated after filtering
-	if (vx_frame_properties_from_metadata(frame, av_frame) != VX_ERR_SUCCESS) {
+	if ((ret = vx_frame_properties_from_metadata(frame, av_frame)) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 
-	return VX_ERR_SUCCESS;
-
 cleanup:
-	if (av_frame) {
-		av_frame_unref(av_frame);
-		av_frame_free(&av_frame);
-	}
-
 	return ret;
 }
 
