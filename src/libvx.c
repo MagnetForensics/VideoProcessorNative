@@ -389,7 +389,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_codec(me->audio_codec_ctx);
+		struct av_audio_params params = av_audio_params_from_codec(me->audio_codec_ctx);
 
 		if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
 			goto cleanup;
@@ -709,7 +709,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->pix_fmt = pix_fmt;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_codec(video->audio_codec_ctx);
+		struct av_audio_params params = av_audio_params_from_codec(video->audio_codec_ctx);
 
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, video->audio_codec_ctx->frame_size) <= 0)
 			goto error;
@@ -942,7 +942,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 	}
 
 	struct av_audio_params initial_params = video->inital_audio_params;
-	struct av_audio_params params = vx_audio_params_from_frame(av_frame, &video->fmt_ctx->streams[video->audio_stream]->time_base);
+	struct av_audio_params params = av_audio_params_from_frame(av_frame, &video->fmt_ctx->streams[video->audio_stream]->time_base);
 	vx_audio_params out_params = video->options.audio_params;
 
 	int estimated_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, params.sample_rate, AV_ROUND_UP);

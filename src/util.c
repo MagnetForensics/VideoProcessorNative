@@ -44,7 +44,16 @@ bool vx_rectangle_contains(vx_rectangle a, vx_rectangle b)
 		&& (b.y + b.height) <= (a.y + a.height);
 }
 
-struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* codec)
+bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio_params b)
+{
+	return av_channel_layout_compare(&a.channel_layout, &b.channel_layout) == 0
+		&& a.sample_rate == b.sample_rate
+		&& a.sample_format == b.sample_format
+		&& a.time_base.den == b.time_base.den
+		&& a.time_base.num == b.time_base.num;
+}
+
+struct av_audio_params av_audio_params_from_codec(const AVCodecContext* codec)
 {
 	struct av_audio_params params = {
 		.channel_layout = codec->ch_layout,
@@ -60,7 +69,7 @@ struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* codec)
 /// Audio parameters from a frame. Optionally provide a backup time base to use
 /// in case the value is not set on the frame.
 /// </summary>
-struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base)
+struct av_audio_params av_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base)
 {
 	const AVRational time_base_corrected = time_base && !vx_is_rational_initialized(frame->time_base)
 		? *time_base
@@ -76,20 +85,11 @@ struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame, const AV
 	return params;
 }
 
-bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio_params b)
-{
-	return av_channel_layout_compare(&a.channel_layout, &b.channel_layout) == 0
-		&& a.sample_rate == b.sample_rate
-		&& a.sample_format == b.sample_format
-		&& a.time_base.den == b.time_base.den
-		&& a.time_base.num == b.time_base.num;
-}
-
 /// <summary>
 /// Video parameters from a frame. Optionally provide a backup time base to use
 /// in case the value is not set on the frame.
 /// </summary>
-struct av_video_params vx_video_params_from_frame(const AVFrame* frame, const AVRational* time_base)
+struct av_video_params av_video_params_from_frame(const AVFrame* frame, const AVRational* time_base)
 {
 	const AVRational time_base_corrected = time_base && !vx_is_rational_initialized(frame->time_base)
 		? *time_base

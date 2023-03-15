@@ -11,9 +11,9 @@ extern "C" {
 	bool vx_rectangle_is_initialized(vx_rectangle rect);
 	bool vx_rectangle_contains(vx_rectangle a, vx_rectangle b);
 	bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio_params b);
-	struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* context);
-	struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base);
-	struct av_video_params vx_video_params_from_frame(const AVFrame* frame, const AVRational* time_base);
+	struct av_audio_params av_audio_params_from_codec(const AVCodecContext* context);
+	struct av_audio_params av_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base);
+	struct av_video_params av_video_params_from_frame(const AVFrame* frame, const AVRational* time_base);
 
 #ifdef __cplusplus
 }

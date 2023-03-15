@@ -130,7 +130,7 @@ vx_error vx_get_filter_args_from_codec(const AVCodecContext* codec, int args_len
 		result = vx_get_video_filter_args(params, args_length, out_args);
 	}
 	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-		struct av_audio_params params = vx_audio_params_from_codec(codec);
+		struct av_audio_params params = av_audio_params_from_codec(codec);
 
 		result = vx_get_audio_filter_args(params, args_length, out_args);
 	}
@@ -343,7 +343,7 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 
 		if (type == AVMEDIA_TYPE_AUDIO) {
 			// Reinitialize the pipeline if the audio properties have changed
-			const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(
+			const struct av_audio_params frame_audio_params = av_audio_params_from_frame(
 				av_frame,
 				&video->fmt_ctx->streams[video->audio_stream]->time_base);
 			const struct av_audio_params filter_audio_params = {
@@ -358,7 +358,7 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 		}
 		else if (type == AVMEDIA_TYPE_VIDEO) {
 			// Reinitialize the pipeline if the frame size has changed
-			struct av_video_params frame_params = vx_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
+			struct av_video_params frame_params = av_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
 
 			if (filter_source->w != av_frame->width || filter_source->h != av_frame->height) {
 
