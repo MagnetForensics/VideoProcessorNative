@@ -433,7 +433,7 @@ void vx_close(vx_video* video)
 	free(video);
 }
 
-static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream)
+static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int stream)
 {
 	// Try to read a frame, if it can't be read, skip ahead a bit and try again
 	int64_t last_fp = avio_tell(fmt_ctx->pb);
@@ -480,7 +480,7 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	}
 
 	while (true) {
-		if (!vx_read_frame(me->fmt_ctx, packet, me->video_stream)) {
+		if (!vx_read_packet(me->fmt_ctx, packet, me->video_stream)) {
 			break;
 		}
 
@@ -775,57 +775,68 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
-static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frame_count)
+static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecContext** out_codec)
 {
-	vx_error ret = VX_ERR_UNKNOWN;
-	AVCodecContext* codec_ctx = NULL;
-	AVFrame* frame = NULL;
-	int frame_count = 0;
-	*out_frame_count = 0;
+	vx_error ret = VX_ERR_SUCCESS;
+	int result = 0;
 
-	// Clear the packet in case it is being reused
-	if (packet && packet->data)
-		av_packet_unref(packet);
+	do {
+		*out_codec = NULL;
+		// Clear the packet for resuse
+		if (packet && packet->data)
+			av_packet_unref(packet);
 
-	// Get a packet, which will usually be a single video frame, or several complete audio frames
-	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
+		// Get a packet, which will usually be a single video frame, or several complete audio frames
+		vx_read_packet(me->fmt_ctx, packet, me->video_stream);
 
-	// Only attempt to decode packets from the streams that have been selected
-	if (packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
-		ret = VX_ERR_SUCCESS;
-		goto cleanup;
-	}
+		// Only attempt to decode packets from the streams that have been selected
+		if (packet && packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
+			// Skip to the next packet
+			result = -1;
+			continue;
+		}
 
-	// If the packet is empty then the end of the video has been reached. However the decoder may still hold a couple
-	// of cached frames and needs to be flushed. This is done by sending an empty packet
-	if (!packet->data) {
-		codec_ctx = me->video_codec_ctx;
-	}
-	else {
-		codec_ctx = packet->stream_index == me->video_stream
-			? me->video_codec_ctx
-			: me->audio_codec_ctx;
-	}
+		// The decoder may still hold a couple of cached frames, so even if the end of the file has been
+		// reached and no packet is returned, it still needs to be sent in order to flush the decoder
+		if (!packet || !packet->data) {
+			*out_codec = me->video_codec_ctx;
+		}
+		else {
+			*out_codec = packet->stream_index == me->video_stream
+				? me->video_codec_ctx
+				: me->audio_codec_ctx;
+		}
 
-	if (!codec_ctx) {
-		goto cleanup;
-	}
+		result = *out_codec != NULL
+			? avcodec_send_packet(*out_codec, packet)
+			: VX_ERR_FIND_CODEC;
+	} while (!result == AVERROR_EOF || vx_is_packet_error(result));
 
-	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
-	// reached and no packet is returned, it still needs to be sent in order to flush the decoder
-	int result = avcodec_send_packet(codec_ctx, packet);
 	if (result == AVERROR_EOF) {
 		ret = VX_ERR_EOF;
-		goto cleanup;
 	}
-	if (vx_is_packet_error(result)) {
+	else if (vx_is_packet_error(result)) {
 		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
 		if (av_strerror(result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
 			av_log(NULL, AV_LOG_ERROR, "Unable to decode packet: %s\n", error_message);
 
 		ret = VX_ERR_DECODE_VIDEO;
-		goto cleanup;
 	}
+
+	return ret;
+}
+
+static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frame_count)
+{
+	vx_error ret = VX_ERR_UNKNOWN;
+	AVCodecContext* codec = NULL;
+	AVFrame* frame = NULL;
+	int frame_count = 0;
+	*out_frame_count = 0;
+	int result = 0;
+
+	if ((ret = vx_decode_next_packet(me, packet, &codec)) != VX_ERR_SUCCESS)
+		goto cleanup;
 
 	// Don't decode audio frames unless audio is enabled
 	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
@@ -836,7 +847,7 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 	// Store all frames returned by the decoder
 	while (result >= 0) {
 		frame = av_frame_alloc();
-		result = avcodec_receive_frame(codec_ctx, frame);
+		result = avcodec_receive_frame(codec, frame);
 
 		if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
 			break;
