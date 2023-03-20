@@ -750,10 +750,14 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	// Open stream
 	int open_result = avformat_open_input(&me->fmt_ctx, filename, NULL, NULL);
 	if (open_result != 0) {
-		if (open_result == AVERROR(ENOENT) || open_result == AVERROR(EINVAL)) {
+		if (open_result == AVERROR(ENOENT)) {
 			error = VX_ERR_FILE_NOT_FOUND;
 		}
 		else {
+			char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
+			if (av_strerror(open_result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
+				av_log(NULL, AV_LOG_ERROR, "Unable to open file: %s\n", error_message);
+
 			error = VX_ERR_OPEN_FILE;
 		}
 		goto cleanup;
