@@ -7,6 +7,24 @@
 
 #include "libvx.h"
 
+/// <summary>
+/// Attempts to retrieve and log the description for the specified AVERROR code.
+/// 
+/// Nothing will be logged unless an error description is retrieved, see av_strerror
+/// </summary>
+/// <param name="av_error_code">The error code to describe</param>
+/// <param name="av_error_level">The importance of the error, see lavu_log_constants</param>
+/// <param name="format">Optional format string (printf-compatible) used to display the error message</param>
+void av_log_error_message(int av_error_code, int av_error_level, const char* format)
+{
+	char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
+	if (!format)
+		format = &"%s\n";
+
+	if (av_strerror(av_error_code, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
+		av_log(NULL, av_error_level, format, error_message);
+}
+
 bool vx_is_packet_error(int result)
 {
 	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;

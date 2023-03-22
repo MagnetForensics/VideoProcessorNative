@@ -279,9 +279,7 @@ static bool find_stream_and_open_codec(
 	{
 		avcodec_free_context(out_codec_ctx);
 
-		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
-		if (av_strerror(open_result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
-			av_log(NULL, AV_LOG_ERROR, "Unable to open codec: %s\n", error_message);
+		av_log_error_message(open_result, AV_LOG_ERROR, "Unable to open codec: %s\n");
 
 		*out_error = VX_ERR_OPEN_CODEC;
 		return false;
@@ -363,9 +361,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			error = VX_ERR_FILE_NOT_FOUND;
 		}
 		else {
-			char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
-			if (av_strerror(open_result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
-				av_log(NULL, AV_LOG_ERROR, "Unable to open file: %s\n", error_message);
+			av_log_error_message(open_result, AV_LOG_ERROR, "Unable to open file: %s\n");
 
 			error = VX_ERR_OPEN_FILE;
 		}
@@ -827,9 +823,7 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 		ret = VX_ERR_EOF;
 	}
 	else if (vx_is_packet_error(result)) {
-		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
-		if (av_strerror(result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
-			av_log(NULL, AV_LOG_ERROR, "Unable to decode packet: %s\n", error_message);
+		av_log_error_message(result, AV_LOG_ERROR, "Unable to decode packet: %s\n");
 
 		ret = VX_ERR_DECODE_VIDEO;
 	}

@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+	void av_log_error_message(int av_error_code, int av_error_level, const char* format);
 	bool vx_is_packet_error(int result);
 	enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt);
 	enum AVSampleFormat vx_to_av_sample_fmt(vx_sample_fmt fmt);
