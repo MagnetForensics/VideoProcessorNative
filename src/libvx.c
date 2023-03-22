@@ -241,6 +241,7 @@ static bool find_stream_and_open_codec(
 {
 	AVCodec* codec;
 	AVCodecContext* codec_ctx;
+	int open_result = 0;
 
 	*out_stream = av_find_best_stream(me->fmt_ctx, type, -1, -1, &codec, 0);
 
@@ -274,8 +275,14 @@ static bool find_stream_and_open_codec(
 	}
 
 	// Open codec
-	if (avcodec_open2(*out_codec_ctx, codec, NULL) < 0)
+	if ((open_result = avcodec_open2(*out_codec_ctx, codec, NULL)) < 0)
 	{
+		avcodec_free_context(out_codec_ctx);
+
+		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
+		if (av_strerror(open_result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
+			av_log(NULL, AV_LOG_ERROR, "Unable to open codec: %s\n", error_message);
+
 		*out_error = VX_ERR_OPEN_CODEC;
 		return false;
 	}
