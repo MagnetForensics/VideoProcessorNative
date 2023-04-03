@@ -7,11 +7,7 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavfilter/avfilter.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/display.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/pixfmt.h>
@@ -20,17 +16,14 @@
 #include <libswresample/swresample.h>
 
 #include "libvx.h"
+#include "util.h"
+#include "filter.h"
 #include "filtergraph.h"
+#include "whisper.h"
 #include "transcribe.h"
 
 #ifdef __cplusplus
 #pragma error
-#endif
-
-#ifdef DEBUG
-#define dprintf(...) { printf("%s:%d %-30s ", __FILE__, __LINE__, __func__); printf(__VA_ARGS__); }
-#else
-#define dprintf(...)
 #endif
 
 #define FRAME_BUFFER_PADDING 4096
@@ -128,30 +121,6 @@ static void vx_log_cb(const void* avcl, int level, const char* fmt, void* vl)
 	}
 }
 
-static enum AVPixelFormat vx_to_av_pix_fmt(vx_pix_fmt fmt)
-{
-	enum AVPixelFormat formats[] = { AV_PIX_FMT_RGB24, AV_PIX_FMT_GRAY8, AV_PIX_FMT_BGRA };
-	return formats[fmt];
-}
-
-static enum AVSampleFormat vx_to_av_sample_fmt(vx_sample_fmt fmt)
-{
-	// Only return packed sample formats, planar formats are not supported in libvx
-	return fmt == VX_SAMPLE_FMT_FLT
-		? AV_SAMPLE_FMT_FLT
-		: AV_SAMPLE_FMT_S16;
-}
-
-static bool vx_is_packet_error(int result)
-{
-	return result != 0 && result != AVERROR(EAGAIN) && result != AVERROR_EOF;
-}
-
-static bool vx_rectangle_is_initialized(vx_rectangle rect)
-{
-	return (rect.x + rect.y + rect.width + rect.height) > 0;
-}
-
 static double vx_timestamp_to_seconds(const vx_video* video, const int stream_type, const long long ts)
 {
 	return (double)ts * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
@@ -179,279 +148,6 @@ static AVFrame* vx_dequeue(vx_video* video)
 static AVFrame* vx_get_first_queue_item(const vx_video* video)
 {
 	return video->frame_queue[video->frame_queue_count - 1];
-}
-
-static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ctx)
-{
-	enum AVPixelFormat format = AV_PIX_FMT_NONE;
-
-	const AVHWFramesConstraints* frame_constraints = av_hwdevice_get_hwframe_constraints(hw_device_ctx, NULL);
-
-	if (frame_constraints) {
-		// Take the first valid format, in the same way that av_hwframe_transfer_data will do
-		// The list of format is always terminated by AV_PIX_FMT_NONE,
-		// or the list will be NULL if the information is not known
-		format = frame_constraints->valid_sw_formats[0];
-
-		av_hwframe_constraints_free(&frame_constraints);
-	}
-
-	return format;
-}
-
-static struct av_audio_params vx_audio_params_from_codec(const AVCodecContext* context)
-{
-	struct av_audio_params params = {
-		.channel_layout = context->ch_layout,
-		.sample_format = context->sample_fmt,
-		.sample_rate = context->sample_rate,
-		.time_base = context->time_base
-	};
-
-	return params;
-}
-
-static struct av_audio_params vx_audio_params_from_frame(const AVFrame* frame)
-{
-	struct av_audio_params params = {
-		.channel_layout = frame->ch_layout,
-		.sample_format = frame->format,
-		.sample_rate = frame->sample_rate,
-		.time_base = frame->time_base
-	};
-
-	return params;
-}
-
-static struct av_video_params vx_video_params_from_frame(const AVFrame* frame)
-{
-	struct av_video_params params = {
-		.width = frame->width,
-		.height = frame->height,
-		.pixel_format = frame->format,
-		.sample_aspect_ratio = frame->sample_aspect_ratio,
-		.time_base = frame->time_base
-	};
-
-	return params;
-}
-
-static bool av_audio_params_equal(const struct av_audio_params a, const struct av_audio_params b)
-{
-	return av_channel_layout_compare(&a.channel_layout, &b.channel_layout) == 0
-		&& a.sample_rate == b.sample_rate
-		&& a.sample_format == b.sample_format
-		&& a.time_base.den == b.time_base.den
-		&& a.time_base.num == b.time_base.num;
-}
-
-static vx_error vx_initialize_audiostats_filter(AVFilterContext** last_filter, const int* pad_index)
-{
-	char args[] = "metadata=1:reset=1:measure_overall=Peak_level+RMS_level+RMS_peak:measure_perchannel=0";
-
-	return vx_insert_filter(last_filter, pad_index, "astats", NULL, args);
-}
-
-static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const int* pad_index, vx_rectangle crop_area)
-{
-	int result = VX_ERR_UNKNOWN;
-	char args[100];
-
-	snprintf(args, sizeof(args),
-		"w=%d:h=%d:x=%d:y=%d:exact=1",
-		crop_area.width, crop_area.height, crop_area.x, crop_area.y);
-
-	if (args) {
-		if ((result = vx_insert_filter(last_filter, pad_index, "crop", NULL, args)) != VX_ERR_SUCCESS)
-			return result;
-	}
-
-	return VX_ERR_SUCCESS;
-}
-
-static vx_error vx_initialize_scene_filter(AVFilterContext** last_filter, const int* pad_index, const float threshold)
-{
-	int result = VX_ERR_UNKNOWN;
-	char args[100];
-
-	snprintf(args, sizeof(args), "threshold=%f", threshold);
-
-	if (args) {
-		if ((result = vx_insert_filter(last_filter, pad_index, "scdet", NULL, args)) != VX_ERR_SUCCESS)
-			return result;
-	}
-
-	return VX_ERR_SUCCESS;
-}
-
-static vx_error vx_initialize_rotation_filter(AVFilterContext** last_filter, const int* pad_index, const AVStream* stream)
-{
-	int result = VX_ERR_UNKNOWN;
-	char* transform = NULL;
-	char* args = NULL;
-	const char* token = NULL;
-
-	result = vx_get_rotation_transform(stream, &transform, &args);
-	if (result != VX_ERR_SUCCESS && result != VX_ERR_STREAM_INFO) {
-		return result;
-	}
-
-	if (transform) {
-		// Parse each filter separately if several are returned
-		size_t transform_size = strlen(transform) + 1;
-		char* src = malloc(transform_size);
-		if (!src)
-			return VX_ERR_ALLOCATE;
-		memcpy(src, transform, transform_size);
-		token = strtok(src, ",");
-
-		while (token) {
-			if (vx_insert_filter(last_filter, pad_index, token, NULL, args) != VX_ERR_SUCCESS)
-				break;
-			token = strtok(NULL, ",");
-		}
-		free(src);
-	}
-
-	return VX_ERR_SUCCESS;
-}
-
-static vx_error vx_initialize_audio_filters(AVFilterContext** last_filter, const int* pad_index)
-{
-	return vx_initialize_audiostats_filter(last_filter, pad_index);
-}
-
-static vx_error vx_initialize_video_filters(const vx_video* video, AVFilterContext** last_filter, const int* pad_index)
-{
-	vx_error result = VX_ERR_SUCCESS;
-	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
-
-	if (video->options.autorotate)
-		if ((result = vx_initialize_rotation_filter(last_filter, pad_index, video_stream)) != VX_ERR_SUCCESS)
-			goto cleanup;
-
-	if (vx_rectangle_is_initialized(video->options.crop_area))
-		if ((result = vx_initialize_crop_filter(last_filter, pad_index, video->options.crop_area)) != VX_ERR_SUCCESS)
-			goto cleanup;
-
-	if (video->options.scene_threshold >= 0)
-		if ((result = vx_initialize_scene_filter(last_filter, pad_index, video->options.scene_threshold)) != VX_ERR_SUCCESS)
-			goto cleanup;
-
-cleanup:
-	return result;
-}
-
-vx_error vx_get_filter_args(const AVCodecContext* codec, AVRational time_base, int args_length, char* out_args)
-{
-	vx_error result = VX_ERR_SUCCESS;
-
-	if (codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-		// Set the correct pixel format, we need to find the format that a hardware frame will
-		// be converted to after transferring to a software frame, but before converting via scaling
-		enum AVPixelFormat format = codec->pix_fmt;
-		if (codec->hw_device_ctx)
-		{
-			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
-			if (!format) {
-				av_log(NULL, AV_LOG_ERROR, "Cannot find compatible pixel format\n");
-				return VX_ERR_INIT_FILTER;
-			}
-		}
-
-		struct av_video_params params = {
-			.width = codec->width,
-			.height = codec->height,
-			.sample_aspect_ratio = codec->sample_aspect_ratio,
-			.pixel_format = format,
-			.time_base = time_base
-		};
-		result = vx_get_video_filter_args(params, args_length, out_args);
-	}
-	else if (codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-		struct av_audio_params params = vx_audio_params_from_codec(codec);
-		params.time_base = time_base;
-
-		result = vx_get_audio_filter_args(params, args_length, out_args);
-	}
-	else {
-		result = VX_ERR_INIT_FILTER;
-	}
-
-	return result;
-}
-
-/// <summary>
-/// Set up the filter pipeline for either an audio or video stream.
-/// Optionally specify the stream parameters as av_audio_params or av_video_params.
-/// </summary>
-static vx_error vx_create_filter_pipeline(const vx_video* video, const enum AVMediaType type, void* params)
-{
-	vx_error result = VX_ERR_INIT_FILTER;
-	bool is_video = type == AVMEDIA_TYPE_VIDEO;
-	AVFilterContext* last_filter = NULL;
-	char args[256] = { 0 };
-	int pad_index = 0;
-
-	if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot create filter pipeline for this media type\n");
-		goto cleanup;
-	}
-
-	AVFilterGraph** filter_graph = is_video
-		? &video->filter_pipeline
-		: &video->filter_pipeline_audio;
-	const AVCodecContext* codec = is_video
-		? video->video_codec_ctx
-		: video->audio_codec_ctx;
-	const AVStream* stream = video->fmt_ctx->streams[is_video ? video->video_stream : video->audio_stream];
-
-	if (*filter_graph)
-		avfilter_graph_free(filter_graph);
-
-	if (params) {
-		if (is_video) {
-			if (vx_get_video_filter_args(*(struct av_video_params*)params, sizeof(args), &args) != VX_ERR_SUCCESS)
-				return VX_ERR_INIT_FILTER;
-		}
-		else {
-			if (vx_get_audio_filter_args(*(struct av_audio_params*)params, sizeof(args), &args) != VX_ERR_SUCCESS)
-				return VX_ERR_INIT_FILTER;
-		}
-	}
-	else {
-		if (vx_get_filter_args(codec, stream->time_base, sizeof(args), &args) != VX_ERR_SUCCESS)
-			return VX_ERR_INIT_FILTER;
-	}
-
-	// Create the pipeline
-	if ((result = vx_filtergraph_init(filter_graph, type, &args)) != VX_ERR_SUCCESS)
-		goto cleanup;
-
-	if ((*filter_graph)->nb_filters > 0)
-		last_filter = (*filter_graph)->filters[0];
-
-	// Add filters
-	if (is_video) {
-		vx_initialize_video_filters(video, &last_filter, &pad_index);
-	}
-	else {
-		vx_initialize_audio_filters(&last_filter, &pad_index);
-	}
-
-	// Complete the pipeline with the added filters
-	return vx_filtergraph_configure(filter_graph, type, &last_filter, &pad_index);
-
-cleanup:
-	if (result != VX_ERR_SUCCESS) {
-		if (last_filter)
-			avfilter_free(last_filter);
-
-		if (filter_graph)
-			avfilter_graph_free(filter_graph);
-	}
-
-	return result;
 }
 
 static bool use_hw(const vx_video* video, const AVCodec* codec)
@@ -507,7 +203,7 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 
 			if (config != NULL && config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == target_type)
 			{
-				dprintf("found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
+				av_log(NULL, AV_LOG_INFO, "Found hardware config: %s\n", av_hwdevice_get_type_name(config->device_type));
 				return config;
 			}
 
@@ -525,7 +221,7 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 
 	if ((err = av_hwdevice_ctx_create(&me->hw_device_ctx, type, NULL, NULL, 0)) < 0)
 	{
-		dprintf("Failed to create specified HW device.\n");
+		av_log(NULL, AV_LOG_INFO, "Failed to create %s HW device\n", av_hwdevice_get_type_name(type));
 		return err;
 	}
 
@@ -548,6 +244,7 @@ static bool find_stream_and_open_codec(
 {
 	AVCodec* codec;
 	AVCodecContext* codec_ctx;
+	int open_result = 0;
 
 	*out_stream = av_find_best_stream(me->fmt_ctx, type, -1, -1, &codec, 0);
 
@@ -581,11 +278,18 @@ static bool find_stream_and_open_codec(
 	}
 
 	// Open codec
-	if (avcodec_open2(*out_codec_ctx, codec, NULL) < 0)
+	if ((open_result = avcodec_open2(*out_codec_ctx, codec, NULL)) < 0)
 	{
+		avcodec_free_context(out_codec_ctx);
+
+		av_log_error_message(open_result, AV_LOG_ERROR, "Unable to open codec: %s\n");
+
 		*out_error = VX_ERR_OPEN_CODEC;
 		return false;
 	}
+
+	// Set the time base for current stream so it can be read elsewhere
+	(*out_codec_ctx)->time_base = me->fmt_ctx->streams[*out_stream]->time_base;
 
 	return true;
 }
@@ -656,10 +360,12 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	// Open stream
 	int open_result = avformat_open_input(&me->fmt_ctx, filename, NULL, NULL);
 	if (open_result != 0) {
-		if (open_result == AVERROR(ENOENT) || open_result == AVERROR(EINVAL)) {
+		if (open_result == AVERROR(ENOENT)) {
 			error = VX_ERR_FILE_NOT_FOUND;
 		}
 		else {
+			av_log_error_message(open_result, AV_LOG_ERROR, "Unable to open file: %s\n");
+
 			error = VX_ERR_OPEN_FILE;
 		}
 		goto cleanup;
@@ -688,18 +394,18 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 	}
 
 	if (me->video_codec_ctx->pix_fmt != AV_PIX_FMT_NONE) {
-		if ((error = vx_create_filter_pipeline(me, AVMEDIA_TYPE_VIDEO, NULL)) != VX_ERR_SUCCESS)
+		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_VIDEO, NULL)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
 	if (me->audio_codec_ctx && me->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_codec(me->audio_codec_ctx);
+		struct av_audio_params params = av_audio_params_from_codec(me->audio_codec_ctx);
 
 		if ((error = vx_init_audio_resampler(me, params, me->options.audio_params)) != VX_ERR_SUCCESS) {
 			goto cleanup;
 		}
 
-		if ((error = vx_create_filter_pipeline(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
+		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
 
@@ -720,6 +426,9 @@ void vx_close(vx_video* video)
 	if (video->filter_pipeline)
 		avfilter_graph_free(&video->filter_pipeline);
 
+	if (video->filter_pipeline_audio)
+		avfilter_graph_free(&video->filter_pipeline_audio);
+
 	if (video->swr_ctx)
 		swr_free(&video->swr_ctx);
 
@@ -734,7 +443,7 @@ void vx_close(vx_video* video)
 	free(video);
 }
 
-static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream)
+static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int stream)
 {
 	// Try to read a frame, if it can't be read, skip ahead a bit and try again
 	int64_t last_fp = avio_tell(fmt_ctx->pb);
@@ -761,7 +470,7 @@ static bool vx_read_frame(AVFormatContext* fmt_ctx, AVPacket* packet, int stream
 			if (fp <= last_fp)
 				fp = last_fp + 100 * (int64_t)i;
 
-			dprintf("retry: @%" PRId64 "\n", fp);
+			av_log(NULL, AV_LOG_DEBUG, "Seeking forward in stream, position: @%" PRId64 "\n", fp);
 			avformat_seek_file(fmt_ctx, stream, fp + 100, fp + 512, fp + 1024 * 1024, AVSEEK_FLAG_BYTE | AVSEEK_FLAG_ANY);
 
 			last_fp = fp;
@@ -781,7 +490,7 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	}
 
 	while (true) {
-		if (!vx_read_frame(me->fmt_ctx, packet, me->video_stream)) {
+		if (!vx_read_packet(me->fmt_ctx, packet, me->video_stream)) {
 			break;
 		}
 
@@ -808,7 +517,7 @@ static bool vx_video_is_rotated(vx_video video)
 	return video.options.autorotate
 		&& vx_get_rotation_transform(video.fmt_ctx->streams[video.video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
 		&& transform == "transpose"
-		&& (transform_args == "dir=clock" || transform_args == "dir=cclock");
+		&& (transform_args == ROTATION_CLOCKWISE || transform_args == ROTATION_COUNTERCLOCKWISE);
 }
 
 /// <summary>
@@ -1022,7 +731,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->pix_fmt = pix_fmt;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
-		struct av_audio_params params = vx_audio_params_from_codec(video->audio_codec_ctx);
+		struct av_audio_params params = av_audio_params_from_codec(video->audio_codec_ctx);
 
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, video->audio_codec_ctx->frame_size) <= 0)
 			goto error;
@@ -1069,7 +778,6 @@ bool vx_frame_has_image(const AVFrame* frame)
 	return frame->pict_type != AV_PICTURE_TYPE_NONE || (frame->width > 0 && frame->height > 0 && frame->nb_samples == 0);
 }
 
-
 void* vx_frame_get_video_buffer(vx_frame* frame, int* out_buffer_size)
 {
 	int av_pixfmt = vx_to_av_pix_fmt(frame->pix_fmt);
@@ -1097,57 +805,66 @@ vx_scene_info vx_frame_get_scene_info(const vx_frame* frame)
 	return frame->scene_info;
 }
 
+static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecContext** out_codec)
+{
+	vx_error ret = VX_ERR_SUCCESS;
+	int result = 0;
+
+	do {
+		*out_codec = NULL;
+		// Clear the packet for resuse
+		if (packet && packet->data)
+			av_packet_unref(packet);
+
+		// Get a packet, which will usually be a single video frame, or several complete audio frames
+		vx_read_packet(me->fmt_ctx, packet, me->video_stream);
+
+		// Only attempt to decode packets from the streams that have been selected
+		if (packet && packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
+			// Skip to the next packet
+			result = -1;
+			continue;
+		}
+
+		// The decoder may still hold a couple of cached frames, so even if the end of the file has been
+		// reached and no packet is returned, it still needs to be sent in order to flush the decoder
+		if (!packet || !packet->data) {
+			*out_codec = me->video_codec_ctx;
+		}
+		else {
+			*out_codec = packet->stream_index == me->video_stream
+				? me->video_codec_ctx
+				: me->audio_codec_ctx;
+		}
+
+		result = *out_codec != NULL
+			? avcodec_send_packet(*out_codec, packet)
+			: VX_ERR_FIND_CODEC;
+	} while (!result == AVERROR_EOF || vx_is_packet_error(result));
+
+	if (result == AVERROR_EOF) {
+		ret = VX_ERR_EOF;
+	}
+	else if (vx_is_packet_error(result)) {
+		av_log_error_message(result, AV_LOG_ERROR, "Unable to decode packet: %s\n");
+
+		ret = VX_ERR_DECODE_VIDEO;
+	}
+
+	return ret;
+}
+
 static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* out_frame_buffer[FRAME_QUEUE_SIZE], int* out_frame_count)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
-	AVCodecContext* codec_ctx = NULL;
+	AVCodecContext* codec = NULL;
 	AVFrame* frame = NULL;
 	int frame_count = 0;
 	*out_frame_count = 0;
+	int result = 0;
 
-	// Clear the packet in case it is being reused
-	if (packet && packet->data)
-		av_packet_unref(packet);
-
-	// Get a packet, which will usually be a single video frame, or several complete audio frames
-	vx_read_frame(me->fmt_ctx, packet, me->video_stream);
-
-	// Only attempt to decode packets from the streams that have been selected
-	if (packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
-		ret = VX_ERR_SUCCESS;
+	if ((ret = vx_decode_next_packet(me, packet, &codec)) != VX_ERR_SUCCESS)
 		goto cleanup;
-	}
-
-	// If the packet is empty then the end of the video has been reached. However the decoder may still hold a couple
-	// of cached frames and needs to be flushed. This is done by sending an empty packet
-	if (!packet->data) {
-		codec_ctx = me->video_codec_ctx;
-	}
-	else {
-		codec_ctx = packet->stream_index == me->video_stream
-			? me->video_codec_ctx
-			: me->audio_codec_ctx;
-	}
-
-	if (!codec_ctx) {
-		goto cleanup;
-	}
-
-	// The decoder may still hold a couple of cached frames, so even if the end of the file has been
-	// reached and no packet is returned, it still needs to be sent in order to flush the decoder
-	int result = avcodec_send_packet(codec_ctx, packet);
-	if (result == AVERROR_EOF) {
-		ret = VX_ERR_EOF;
-		goto cleanup;
-	}
-	if (vx_is_packet_error(result)) {
-		char error_message[AV_ERROR_MAX_STRING_SIZE] = { 0 };
-		if (av_strerror(result, &error_message, AV_ERROR_MAX_STRING_SIZE) == 0)
-			av_log(NULL, AV_LOG_ERROR, "Unable to decode packet: %s\n", error_message);
-
-		ret = VX_ERR_DECODE_VIDEO;
-		goto cleanup;
-	}
 
 	// Don't decode audio frames unless audio is enabled
 	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
@@ -1158,7 +875,7 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 	// Store all frames returned by the decoder
 	while (result >= 0) {
 		frame = av_frame_alloc();
-		result = avcodec_receive_frame(codec_ctx, frame);
+		result = avcodec_receive_frame(codec, frame);
 
 		if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
 			break;
@@ -1223,112 +940,6 @@ static vx_error vx_frame_properties_from_metadata(vx_frame* frame, const AVFrame
 	return VX_ERR_SUCCESS;
 }
 
-static vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame)
-{
-	vx_error result = VX_ERR_UNKNOWN;
-	int ret = 0;
-
-	if (video->filter_pipeline && video->filter_pipeline->nb_filters > 1) {
-		const AVFilterContext* filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
-		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
-
-		// Reinitialize the pipeline if the frame size has changed
-		const struct av_video_params frame_params = vx_video_params_from_frame(av_frame);
-		if (filter_source->outputs[0]->w != av_frame->width || filter_source->outputs[0]->h != av_frame->height) {
-			if ((result = vx_create_filter_pipeline(video, AVMEDIA_TYPE_VIDEO, &frame_params) != VX_ERR_SUCCESS))
-				return result;
-
-			filter_source = avfilter_graph_get_filter(video->filter_pipeline, "in");
-			filter_sink = avfilter_graph_get_filter(video->filter_pipeline, "out");
-		}
-
-		if (!(filter_source && filter_sink)) {
-			result = VX_ERR_INIT_FILTER;
-			goto cleanup;
-		}
-
-		if (av_buffersrc_add_frame_flags(filter_source, av_frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-			av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
-			goto cleanup;
-		}
-
-		// The frame is being reused so we have to tidy it up
-		av_frame_unref(av_frame);
-
-		while (ret == 0) {
-			ret = av_buffersink_get_frame(filter_sink, av_frame);
-
-			if (vx_is_packet_error(ret)) {
-				av_log(NULL, AV_LOG_ERROR, "Error retrieving frames from the filtergraph\n");
-				goto cleanup;
-			}
-		}
-	}
-
-	result = VX_ERR_SUCCESS;
-
-cleanup:
-	return result;
-}
-
-static vx_error vx_filter_audio_frame(const vx_video* video, AVFrame* av_frame)
-{
-	vx_error result = VX_ERR_UNKNOWN;
-	int ret = 0;
-
-	if (video->filter_pipeline_audio && video->filter_pipeline_audio->nb_filters > 1) {
-		const AVFilterContext* filter_source = avfilter_graph_get_filter(video->filter_pipeline_audio, "in");
-		const AVFilterContext* filter_sink = avfilter_graph_get_filter(video->filter_pipeline_audio, "out");
-
-		// Reinitialize the pipeline if the audio properties have changed
-		const struct av_audio_params frame_audio_params = vx_audio_params_from_frame(av_frame);
-		const struct av_audio_params filter_audio_params = {
-			.channel_layout = filter_source->outputs[0]->ch_layout,
-			.sample_format = filter_source->outputs[0]->format,
-			.sample_rate = filter_source->outputs[0]->sample_rate,
-			.time_base = filter_source->outputs[0]->time_base
-		};
-		if (!av_audio_params_equal(frame_audio_params, filter_audio_params)) {
-			if ((result = vx_create_filter_pipeline(video, AVMEDIA_TYPE_AUDIO, &frame_audio_params) != VX_ERR_SUCCESS))
-				return result;
-
-			filter_source = avfilter_graph_get_filter(video->filter_pipeline_audio, "in");
-			filter_sink = avfilter_graph_get_filter(video->filter_pipeline_audio, "out");
-		}
-
-		if (!(filter_source && filter_sink)) {
-			result = VX_ERR_INIT_FILTER;
-			goto cleanup;
-		}
-
-		if (av_buffersrc_add_frame_flags(filter_source, av_frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-			av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
-			goto cleanup;
-		}
-
-		// The frame reference is being reused, so the old frame has to be cleaned up first
-		av_frame_unref(av_frame);
-
-		// More than one frame could be returned, depending on the filter graph layout or
-		// how many frames were fed to the buffer source.
-		// Only non-branching graphs are currently used, but this would need updating to handle
-		// multiple frames if more complex graphs were used.
-		while ((ret >= 0 || ret == AVERROR(EAGAIN)) && !av_frame->data[0]) {
-			ret = av_buffersink_get_frame(filter_sink, av_frame);
-
-			if (vx_is_packet_error(ret)) {
-				av_log(NULL, AV_LOG_ERROR, "Error retrieving frames from the filtergraph\n");
-				goto cleanup;
-			}
-		}
-	}
-
-	result = VX_ERR_SUCCESS;
-
-cleanup:
-	return result;
-}
-
 static vx_error vx_scale_frame(const AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error ret = VX_ERR_UNKNOWN;
@@ -1368,7 +979,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 	}
 
 	struct av_audio_params initial_params = video->inital_audio_params;
-	struct av_audio_params params = vx_audio_params_from_frame(av_frame);
+	struct av_audio_params params = av_audio_params_from_frame(av_frame, &video->fmt_ctx->streams[video->audio_stream]->time_base);
 	vx_audio_params out_params = video->options.audio_params;
 
 	int estimated_sample_count = (int)av_rescale_rnd(av_frame->nb_samples, out_params.sample_rate, params.sample_rate, AV_ROUND_UP);
@@ -1387,7 +998,7 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, NULL) <= 0)
 			return VX_ERR_RESAMPLE_AUDIO;
 		if (vx_init_audio_resampler(video, params, out_params) != VX_ERR_SUCCESS) {
-			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change.\n");
+			av_log(NULL, AV_LOG_ERROR, "Unable to reinitialize audio resampler after format change\n");
 			return VX_ERR_ALLOCATE;
 		}
 	}
@@ -1548,7 +1159,7 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 {
 	vx_error result = VX_ERR_SUCCESS;
 
-	result = vx_filter_audio_frame(video, av_frame);
+	result = vx_filter_frame(video, av_frame, AVMEDIA_TYPE_AUDIO);
 
 	// Fill the audio buffer
 	if (result == VX_ERR_SUCCESS)
@@ -1585,7 +1196,7 @@ vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, 
 		av_frame = sw_frame;
 	}
 
-	if (vx_filter_frame(video, av_frame) != VX_ERR_SUCCESS) {
+	if (vx_filter_frame(video, av_frame, AVMEDIA_TYPE_VIDEO) != VX_ERR_SUCCESS) {
 		goto end;
 	}
 
@@ -1618,7 +1229,7 @@ end:
 
 vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 {
-	vx_error ret = VX_ERR_UNKNOWN;
+	vx_error ret = VX_ERR_SUCCESS;
 	AVFrame* av_frame = NULL;
 
 	if (video->frame_queue_count <= 0)
@@ -1627,7 +1238,10 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	// Get the first item from the queue, but do not dequeue
 	av_frame = vx_get_first_queue_item(video);
 	if (!av_frame)
+	{
+		ret = VX_ERR_UNKNOWN;
 		goto cleanup;
+	}
 
 	// Run the frame through the filter pipeline, if any
 	if (vx_frame_has_image(av_frame)) {
@@ -1641,22 +1255,15 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		}
 	}
 	else {
-		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data and the buffer could not be transferred.\n");
+		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data so the buffer could not be transferred\n");
 	}
 
 	// Frame properties that may have been updated after filtering
-	if (vx_frame_properties_from_metadata(frame, av_frame) != VX_ERR_SUCCESS) {
+	if ((ret = vx_frame_properties_from_metadata(frame, av_frame)) != VX_ERR_SUCCESS) {
 		goto cleanup;
 	}
 
-	return VX_ERR_SUCCESS;
-
 cleanup:
-	if (av_frame) {
-		av_frame_unref(av_frame);
-		av_frame_free(&av_frame);
-	}
-
 	return ret;
 }
 
