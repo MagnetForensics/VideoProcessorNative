@@ -155,10 +155,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="src\filter.h" />
+    <ClInclude Include="src\filtergraph.h" />
     <ClInclude Include="src\libvx.h" />
+    <ClInclude Include="src\util.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\filter.c" />
+    <ClCompile Include="src\filtergraph.c" />
     <ClCompile Include="src\libvx.c" />
+    <ClCompile Include="src\util.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
