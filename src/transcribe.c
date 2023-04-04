@@ -17,30 +17,33 @@
 #include <libswresample/swresample.h>
 
 #include "transcribe.h"
+#include "filter.h"
+#include "filtergraph.h"
+#include "util.h"
 #include "whisper.h"
 
 #ifdef __cplusplus
 #pragma error
 #endif
 
-#define HINT_TOKENS_COUNT 32
+#define WHISPER_CHANNEL_COUNT 2
+#define WHISPER_TEXT_MAX_LENGTH 255
+#define WHISPER_LANGUAGE_MAX_LENGTH 2
+#define WHISPER_HINT_TOKENS_COUNT 32
 #define AUDIO_BUFFER_SECONDS 4
-#define WHISPER_CHANNEL_COUNT 1
+#define AUDIO_BUFFER_MAX_SAMPLES AUDIO_BUFFER_SECONDS * WHISPER_SAMPLE_RATE
 
 struct vx_transcription_ctx {
 	struct whisper_context* whisper_ctx;
 	enum whisper_sampling_strategy strategy;
 
-	AVFilterGraph* filter_pipeline;
-	SwrContext* resampling_ctx;
-	float* audio_buffer;
-	//uint8_t** audio_buffer;
+	AVFilterGraph* filter_graph;
+	struct av_audio_params audio_params;
+	uint8_t** audio_buffer;
 	int sample_count;
 
-	whisper_token hint_tokens[HINT_TOKENS_COUNT];
+	whisper_token hint_tokens[WHISPER_HINT_TOKENS_COUNT];
 	int hint_token_count;
-
-	void* logging_cb;
 };
 
 static enum whisper_sampling_strategy vx_to_whisper_strategy(vx_transcription_strategy strategy)
@@ -49,34 +52,54 @@ static enum whisper_sampling_strategy vx_to_whisper_strategy(vx_transcription_st
 	return strategies[strategy];
 }
 
+static vx_transcription_segment* vx_transcription_segment_init()
+{
+	vx_transcription_segment* segment = calloc(1, sizeof(vx_transcription_segment));
+	if (!segment)
+		return NULL;
+
+	segment->text = calloc(WHISPER_TEXT_MAX_LENGTH + 1, sizeof(char));
+	segment->language = calloc(WHISPER_LANGUAGE_MAX_LENGTH + 1, sizeof(char));
+
+	return segment;
+}
+
 /// <summary>
 /// Create a new transcription context, returns NULL on error.
 /// </summary>
 struct vx_transcription_ctx* vx_transcription_init(const char* model_path, vx_transcription_strategy strategy)
 {
-	vx_transcription_ctx* ctx = malloc(sizeof(vx_transcription_ctx));
+	struct av_audio_params default_params = VX_TRANSCRIPTION_AUDIO_PARAMS;
+	vx_transcription_ctx* ctx = calloc(1, sizeof(vx_transcription_ctx));
 	if (!ctx)
 		goto cleanup;
 
+	// Audio input is assumed to be in the correct format, unless set via filtering
+	ctx->audio_params = default_params;
 	ctx->strategy = vx_to_whisper_strategy(strategy);
 
-	ctx->audio_buffer = malloc(WHISPER_SAMPLE_RATE * AUDIO_BUFFER_SECONDS * sizeof(float));
+	int ret = av_samples_alloc_array_and_samples(
+		&ctx->audio_buffer,
+		NULL,
+		default_params.channel_layout.nb_channels,
+		AUDIO_BUFFER_MAX_SAMPLES,
+		default_params.sample_format,
+		0);
 
-	if (!ctx->audio_buffer)
+	if (ret < 0)
 		goto cleanup;
 
 	ctx->whisper_ctx = whisper_init(model_path);
-
 	if (!ctx->whisper_ctx)
 		goto cleanup;
 
-	char* sys_info = whisper_print_system_info();
-	printf("%s", sys_info);
+	av_log(NULL, AV_LOG_INFO, whisper_print_system_info());
 
 	return ctx;
 
 cleanup:
 	vx_transcription_free(ctx);
+	av_log(NULL, AV_LOG_ERROR, "Unable to initialize transcription context.\n");
 
 	return NULL;
 }
@@ -102,126 +125,237 @@ static vx_error vx_insert_filter(AVFilterContext** last_filter, int* pad_index, 
 	return VX_ERR_SUCCESS;
 }
 
-vx_error vx_init_audio_conversion(vx_transcription_ctx* ctx, vx_video* video)
+static vx_error vx_initialize_resample_filter(AVFilterContext** last_filter, const int* pad_index)
 {
+	char args[100];
+	char layout[100];
+	struct av_audio_params audio_params = VX_TRANSCRIPTION_AUDIO_PARAMS;
 
+	av_channel_layout_describe(&audio_params.channel_layout, layout, sizeof(layout));
+
+	snprintf(
+		args,
+		sizeof(args),
+		"out_sample_rate=%i:out_chlayout=%s:out_sample_fmt=%s",
+		audio_params.sample_rate,
+		layout,
+		av_get_sample_fmt_name(audio_params.sample_format));
+
+	return vx_filtergraph_insert_filter(last_filter, pad_index, "aresample", NULL, args);
 }
 
-/// <summary>
-/// Transcribe audio frames to text. Audio conversion must be initialized before transcribing directly from frames.
-/// Audio may be buffered internally until there is enough audio to feed the transcriber.
-/// Buffered audio and any remaining text can be retrieved by flushing the transcriber with a empty sample packet.
-/// </summary>
-vx_error vx_transcribe(vx_transcription_ctx* ctx, AVFrame* frame, struct vx_transcription_segment* out_transcription)
+static vx_error vx_initialize_audio_filters(AVFilterContext** last_filter, const int* pad_index)
 {
-	//enum AVSampleFormat sample_format = vx_to_av_sample_fmt(video->options.audio_params.sample_format);
-	enum AVSampleFormat sample_format = AV_SAMPLE_FMT_FLT;
-	int max_samples = WHISPER_SAMPLE_RATE * AUDIO_BUFFER_SECONDS;
+	vx_error result = VX_ERR_SUCCESS;
 
-	if (ctx->sample_count + frame->nb_samples < max_samples) {
+	// TODO: Remove distortion and noise
+	// See afir and anlmdn
+	// and/or highpass=f=200, lowpass=f=3000
+	// TODO: Remove silence
+	// see silenceremove
+	// TODO: Enhance speech
+	// See arnndn and https://github.com/GregorR/rnnoise-models
+	// or afftdn nf=-25
+
+	// Resample to Whisper compatible format
+	// TODO: Convert to correct number of channels
+	if ((result = vx_initialize_resample_filter(last_filter, pad_index)) != VX_ERR_SUCCESS)
+		goto cleanup;
+
+cleanup:
+	return result;
+}
+
+vx_error vx_transcription_initialize_audio_conversion(vx_transcription_ctx** ctx, struct av_audio_params params)
+{
+	vx_error result = VX_ERR_SUCCESS;
+	AVFilterGraph** filter_graph = &(*ctx)->filter_graph;
+	AVFilterContext* last_filter = NULL;
+	char filter_args[256] = { 0 };
+	int pad_index = 0;
+
+	if ((*ctx)->filter_graph)
+		avfilter_graph_free(filter_graph);
+
+	(*ctx)->audio_params = params;
+
+	// Whisper only supports two channels, or mono
+	AVChannelLayout layout = { 0 };
+	av_channel_layout_default(&layout, WHISPER_CHANNEL_COUNT);
+	(*ctx)->audio_params.channel_layout = layout;
+
+	if ((result = vx_get_audio_filter_args(params, sizeof(filter_args), &filter_args)) != VX_ERR_SUCCESS)
+		goto end;
+
+	if ((result = vx_filtergraph_init(filter_graph, AVMEDIA_TYPE_AUDIO, &filter_args) || !*filter_graph) != VX_ERR_SUCCESS)
+		goto end;
+
+	last_filter = (*filter_graph)->filters[(*filter_graph)->nb_filters - 1];
+
+	if ((result = vx_initialize_audio_filters(&last_filter, &pad_index)) != VX_ERR_SUCCESS)
+		goto end;
+
+	if ((result = vx_filtergraph_configure(filter_graph, AVMEDIA_TYPE_AUDIO, &last_filter, &pad_index)) != VX_ERR_SUCCESS)
+		goto end;
+
+end:
+	return result;
+}
+
+vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_transcription_segment** out_transcription, int* out_count)
+{
+	vx_error result = VX_ERR_SUCCESS;
+	if (!frame || frame->nb_samples <= 0)
+		return VX_ERR_NO_AUDIO;
+
+	if (!(*ctx)->filter_graph) {
+		av_log(NULL, AV_LOG_ERROR, "Audio filtering must be initialized before transcribing frames.");
+		return VX_ERR_RESAMPLE_AUDIO;
+	}
+
+	struct av_audio_params frame_audio_params = av_audio_params_from_frame(frame, NULL);
+	if (!av_audio_params_equal((*ctx)->audio_params, frame_audio_params)) {
+		// TODO: Fill in params for logging
+		av_log(NULL, AV_LOG_ERROR, "Frame audio parameters () did not match the expected format ()");
+		//return VX_ERR_RESAMPLE_AUDIO;
+	}
+
+	if ((result = vx_filtergraph_process_frame(&(*ctx)->filter_graph, frame)) != VX_ERR_SUCCESS)
+		return result;
+
+	result = vx_transcribe_samples(ctx, (const uint8_t**)frame->data, frame->nb_samples, out_transcription, out_count);
+
+	return result;
+}
+
+vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** samples, int sample_count, vx_transcription_segment** out_transcription, int* out_count)
+{
+	vx_error result = VX_ERR_SUCCESS;
+	struct av_audio_params audio_params = VX_TRANSCRIPTION_AUDIO_PARAMS;
+
+	if ((*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
 		// Buffer audio if there is not enough for transcription
-		av_samples_copy(ctx->audio_buffer, (const uint8_t* const*)frame->data, ctx->sample_count, 0, frame->nb_samples, WHISPER_CHANNEL_COUNT, sample_format);
-		ctx->sample_count += frame->nb_samples;
-	}
-	else {
-		vx_error ret = vx_transcribe_samples(ctx, frame->buf, frame->nb_samples, out_transcription);
+		int copy_result = av_samples_copy(
+			(*ctx)->audio_buffer,
+			(const uint8_t* const*)samples,
+			(*ctx)->sample_count,
+			0,
+			sample_count,
+			audio_params.channel_layout.nb_channels,
+			audio_params.sample_format);
 
-		if (ret != VX_ERR_SUCCESS)
-			return ret;
-	}
-}
+		if (copy_result < 0)
+			return VX_ERR_RESAMPLE_AUDIO;
 
-/// <summary>
-/// Transcribe raw audio samples to text. No resampling or filtering with be done so samples must be in the correct format for transcription.
-/// An error will be returned if there are not enough samples for transcription.
-/// </summary>
-vx_error vx_transcribe_samples(vx_transcription_ctx* ctx, void* samples, int sample_count, struct vx_transcription_segment* out_transcription)
-{
-	if (sample_count < 1 * WHISPER_SAMPLE_RATE) {
-		return VX_ERR_UNKNOWN;
+		(*ctx)->sample_count += sample_count;
+
+		return VX_ERR_SUCCESS;
 	}
 
 	// Transcribe audio
-	//struct whisper_full_params params = whisper_full_default_params(ctx->strategy);
-	//params.language = "auto";
-	//params.print_progress = false;
-	//params.n_threads = 8;
-	//params.duration_ms = 0; // Use all the provided samples
-	//params.no_context = true;
-	//params.audio_ctx = 0;
-	//params.token_timestamps = true;
-	//params.max_tokens = 32;
-	//params.prompt_tokens = video->transcription_hints;
-	//params.prompt_n_tokens = video->transcription_hints_count;
+	struct whisper_full_params params = whisper_full_default_params((*ctx)->strategy);
+	params.language = "auto";
+	params.print_progress = false;
+	params.n_threads = 8; // TODO: Set dynamically
+	params.duration_ms = 0; // Use all the provided samples
+	params.no_context = true;
+	params.audio_ctx = 0;
+	params.token_timestamps = true;
+	params.max_tokens = 32;
+	params.prompt_tokens = (*ctx)->hint_tokens;
+	params.prompt_n_tokens = (*ctx)->hint_token_count;
 
-	//// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
-	//// Save any remaining samples to be processed with the next batch
-	//// TODO: Handle processing of all remaining samples on last frame. Pad with silence?
-	//int samples_to_keep = video->sample_count % video->options.audio_params.sample_rate;
-	//int samples_to_process = video->sample_count - samples_to_keep;
+	// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
+	// Save any remaining samples to be processed with the next batch
+	// TODO: Handle processing of all remaining samples on last frame. Pad with silence?
+	int samples_to_keep = (*ctx)->sample_count % audio_params.sample_rate;
+	int samples_to_process = (*ctx)->sample_count - samples_to_keep;
 
-	//// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
-	//// In this case, linesize is the buffer size, in bytes, for the 1 plane
-	//int whisper_result = whisper_full(video->whisper_ctx, params, (const float*)video->audio_buffer[0], samples_to_process);
+	// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
+	// In this case, linesize is the buffer size, in bytes, for the 1 plane
+	int whisper_result = whisper_full((*ctx)->whisper_ctx, params, (const float*)(*ctx)->audio_buffer[0], samples_to_process * audio_params.channel_layout.nb_channels);
 
-	//if (whisper_result == 0) {
-	//	int keep_ms = 200;
-	//	const int n_segments = whisper_full_n_segments(video->whisper_ctx);
+	if (whisper_result == 0) {
+		int keep_ms = 200;
+		const int n_segments = whisper_full_n_segments((*ctx)->whisper_ctx);
 
-	//	for (int i = 0; i < n_segments; i++) {
-	//		vx_audio_transcription* transcription = &frame->audio_info.transcription[i];
-	//		const char* text = whisper_full_get_segment_text(video->whisper_ctx, i);
+		if (n_segments > 0) {
+			*out_transcription = malloc(n_segments * sizeof(vx_transcription_segment*));
+			if (!out_transcription)
+				return VX_ERR_ALLOCATE;
+		}
 
-	//		const int64_t t0 = params.token_timestamps ? whisper_full_get_segment_t0(video->whisper_ctx, i) : 0;
-	//		const int64_t t1 = params.token_timestamps ? whisper_full_get_segment_t1(video->whisper_ctx, i) : 0;
+		for (int i = 0; i < n_segments; i++) {
+			vx_transcription_segment* segment = vx_transcription_segment_init();
+			const char* text = whisper_full_get_segment_text((*ctx)->whisper_ctx, i);
 
-	//		// Timestamps in milliseconds
-	//		transcription->ts_start = max((t0 * 10) - keep_ms, 0);
-	//		transcription->ts_end = max((t1 * 10) - keep_ms, 0);
-	//		strcpy_s(transcription->text, 256 + 1, text);
-	//		transcription->text_length = (int)strlen(text);
-	//		//transcription->language = whisper_full_lang_id(video->whisper_ctx); // TODO: Available in latest version of whisper.cpp
-	//		strcpy_s(transcription->language, 2 + 1, "en");
+			const int64_t t0 = params.token_timestamps ? whisper_full_get_segment_t0((*ctx)->whisper_ctx, i) : 0;
+			const int64_t t1 = params.token_timestamps ? whisper_full_get_segment_t1((*ctx)->whisper_ctx, i) : 0;
 
-	//		dprintf(text);
-	//	}
+			// Timestamps in milliseconds
+			segment->ts_start = max((t0 * 10) - keep_ms, 0);
+			segment->ts_end = max((t1 * 10) - keep_ms, 0);
+			strcpy_s(segment->text, WHISPER_TEXT_MAX_LENGTH + 1, text);
+			segment->text_length = (int)strlen(text);
+			//transcription->language = whisper_full_lang_id(video->whisper_ctx); // TODO: Available in latest version of whisper.cpp
+			strcpy_s(segment->language, WHISPER_LANGUAGE_MAX_LENGTH + 1, "en");
 
-	//	// Keep the last few samples to mitigate word boundary issues
-	//	samples_to_keep += (int)(((double)keep_ms / 1000) * video->options.audio_params.sample_rate);
+			out_transcription[i] = segment;
+			(*out_count)++;
+		}
 
-	//	if (samples_to_keep > 0)
-	//		av_samples_copy(video->audio_buffer, (const uint8_t* const*)video->audio_buffer, 0, video->sample_count - samples_to_keep, samples_to_keep, video->options.audio_params.channels, sample_format);
-	//	av_samples_set_silence(video->audio_buffer, samples_to_keep, (video->options.audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, video->options.audio_params.channels, sample_format);
-	//	video->sample_count = samples_to_keep;
+		// Keep the last few samples to mitigate word boundary issues
+		samples_to_keep += (int)(((double)keep_ms / 1000) * audio_params.sample_rate);
 
-	//	// Add tokens of the last full length segment as the prompt
-	//	memset(video->transcription_hints, 0, sizeof(video->transcription_hints));
-	//	video->transcription_hints_count = 0;
+		if (samples_to_keep > 0)
+			av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, 0, (*ctx)->sample_count - samples_to_keep, samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+		av_samples_set_silence((*ctx)->audio_buffer, samples_to_keep, ((*ctx)->audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+		(*ctx)->sample_count = samples_to_keep;
 
-	//	if (n_segments > 0) {
-	//		int last_segment = n_segments - 1;
-	//		const int token_count = whisper_full_n_tokens(video->whisper_ctx, last_segment);
-	//		const int token_offset = token_count - min(token_count, params.max_tokens);
-	//		for (int j = token_offset; j < min(token_count, params.max_tokens); ++j) {
-	//			video->transcription_hints[j] = (whisper_full_get_token_id(video->whisper_ctx, last_segment, j));
-	//			video->transcription_hints_count++;
-	//		}
-	//	}
-	//}
+		// Add tokens of the last full length segment as the prompt
+		memset((*ctx)->hint_tokens, 0, sizeof((*ctx)->hint_tokens));
+		(*ctx)->hint_token_count = 0;
 
-	//// Finally, store the samples that would not fit
-	//av_samples_copy(video->audio_buffer, (const uint8_t* const*)frame->audio_buffer, video->sample_count, 0, frame->audio_sample_count, video->options.audio_params.channels, sample_format);
-	//video->sample_count += frame->audio_sample_count;
+		if (n_segments > 0) {
+			int last_segment = n_segments - 1;
+			const int token_count = whisper_full_n_tokens((*ctx)->whisper_ctx, last_segment);
+			const int token_offset = token_count - min(token_count, params.max_tokens);
+			for (int j = token_offset; j < min(token_count, params.max_tokens); ++j) {
+				(*ctx)->hint_tokens[j] = (whisper_full_get_token_id((*ctx)->whisper_ctx, last_segment, j));
+				(*ctx)->hint_token_count++;
+			}
+		}
+	}
+
+	// Finally, store the samples that would not fit
+	av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, (*ctx)->sample_count, 0, sample_count, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+	(*ctx)->sample_count += sample_count;
+
+	return result;
 }
 
-void vx_transcription_free(vx_transcription_ctx* ctx)
+void vx_transcription_segment_free(vx_transcription_segment* segment)
+{
+	if (segment) {
+		if (segment->text)
+			free(segment->text);
+
+		if (segment->language)
+			free(segment->language);
+
+		free(segment);
+	}
+}
+
+void vx_transcription_free(vx_transcription_ctx** ctx)
 {
 	if (ctx) {
-		if (ctx->whisper_ctx)
-			free(&ctx->whisper_ctx);
-		if (ctx->audio_buffer)
-			free(&ctx->audio_buffer);
+		if ((*ctx)->whisper_ctx)
+			free(&(*ctx)->whisper_ctx);
 
-		free(&ctx);
+		if ((*ctx)->audio_buffer)
+			free(&(*ctx)->audio_buffer);
+
+		free(ctx);
 	}
 }

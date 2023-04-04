@@ -137,6 +137,7 @@ struct vx_video
 
 	struct AVFilterGraph* filter_pipeline;
 	struct AVFilterGraph* filter_pipeline_audio;
+	struct vx_transcription_context* transcription_ctx;
 
 	int video_stream;
 	int audio_stream;

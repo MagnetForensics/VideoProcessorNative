@@ -63,7 +63,7 @@ vx_error vx_get_rotation_transform(const AVStream* stream, char** out_transform,
 	return result;
 }
 
-static vx_error vx_get_video_filter_args(struct av_video_params params, int args_length, char* out_args)
+vx_error vx_get_video_filter_args(struct av_video_params params, int args_length, char* out_args)
 {
 	snprintf(
 		out_args,
@@ -80,7 +80,7 @@ static vx_error vx_get_video_filter_args(struct av_video_params params, int args
 	return VX_ERR_SUCCESS;
 }
 
-static vx_error vx_get_audio_filter_args(struct av_audio_params params, int args_length, char* out_args)
+vx_error vx_get_audio_filter_args(struct av_audio_params params, int args_length, char* out_args)
 {
 	char layout[100];
 

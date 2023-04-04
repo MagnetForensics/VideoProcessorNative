@@ -39,6 +39,8 @@ struct vx_audio_info
 	double rms_level;
 	double rms_peak;
 	//vx_transcription_segment transcription[10];
+	vx_transcription_segment* transcription;
+	int transcription_count;
 };
 
 struct vx_scene_info
@@ -58,6 +60,7 @@ struct vx_frame
 
 	vx_audio_info audio_info;
 	vx_scene_info scene_info;
+	vx_transcription_segment* transcription;
 
 	uint8_t** audio_buffer;
 	void* buffer;
@@ -407,6 +410,19 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 
 		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
 			goto cleanup;
+
+		if (me->options.audio_params.transcribe) {
+			me->transcription_ctx = vx_transcription_init("ggml-model-whisper-base.bin", VX_STRATEGY_GREEDY);
+			if (!me->transcription_ctx) {
+				error = VX_ERR_ALLOCATE;
+				goto cleanup;
+			}
+			// Transcription occurs after resampling so further filtering needs to be from the
+			// resampled audio format, not from the original source format
+			params.sample_rate = me->options.audio_params.sample_rate;
+			if ((error = vx_transcription_initialize_audio_conversion(&me->transcription_ctx, params)) != VX_ERR_SUCCESS)
+				goto cleanup;
+		}
 	}
 
 	*video = me;
@@ -428,6 +444,9 @@ void vx_close(vx_video* video)
 
 	if (video->filter_pipeline_audio)
 		avfilter_graph_free(&video->filter_pipeline_audio);
+
+	if (video->transcription_ctx)
+		vx_transcription_free(&video->transcription_ctx);
 
 	if (video->swr_ctx)
 		swr_free(&video->swr_ctx);
@@ -683,18 +702,6 @@ static int vx_frame_init_audio_buffer(
 
 	frame->max_samples = sample_count;
 
-	//if (video->options.audio_params.transcribe) {
-	//	//for (int i = 0; i < 10; i++) {
-	//	//	frame->audio_info.transcription[i].text = malloc((256 + 1) * sizeof(char));
-	//	//	if (!frame->audio_info.transcription[i].text)
-	//	//		return VX_ERR_ALLOCATE;
-
-	//	//	frame->audio_info.transcription[i].language = malloc((2 + 1) * sizeof(char));
-	//	//	if (!frame->audio_info.transcription[i].language)
-	//	//		return VX_ERR_ALLOCATE;
-	//	//}
-	//}
-
 	return  ret >= 0
 		? sample_count
 		: -1;
@@ -729,6 +736,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->width = width;
 	frame->height = height;
 	frame->pix_fmt = pix_fmt;
+	frame->transcription = NULL;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
 		struct av_audio_params params = av_audio_params_from_codec(video->audio_codec_ctx);
@@ -1010,6 +1018,8 @@ static vx_error vx_frame_process_audio(vx_video* video, AVFrame* av_frame, vx_fr
 
 	int sample_count = swr_convert(video->swr_ctx, frame->audio_buffer, estimated_sample_count, (const uint8_t**)av_frame->data, av_frame->nb_samples);
 
+	swr_convert_frame(video->swr_ctx, av_frame, av_frame);
+
 	if (sample_count < 0) {
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
@@ -1164,6 +1174,9 @@ vx_error vx_frame_transfer_audio_data(vx_video* video, AVFrame* av_frame, vx_fra
 	// Fill the audio buffer
 	if (result == VX_ERR_SUCCESS)
 		result = vx_frame_process_audio(video, av_frame, frame);
+
+	if (result == VX_ERR_SUCCESS && video->options.audio_params.transcribe)
+		result = vx_transcribe_frame(&video->transcription_ctx, av_frame, &frame->audio_info.transcription, &frame->audio_info.transcription_count);
 
 	return result;
 }
