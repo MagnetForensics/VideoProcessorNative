@@ -60,7 +60,6 @@ struct vx_frame
 
 	vx_audio_info audio_info;
 	vx_scene_info scene_info;
-	vx_transcription_segment* transcription;
 
 	uint8_t** audio_buffer;
 	void* buffer;
@@ -736,7 +735,6 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 	frame->width = width;
 	frame->height = height;
 	frame->pix_fmt = pix_fmt;
-	frame->transcription = NULL;
 
 	if (video->audio_codec_ctx && video->options.audio_params.channels > 0) {
 		struct av_audio_params params = av_audio_params_from_codec(video->audio_codec_ctx);
