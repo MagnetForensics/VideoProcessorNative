@@ -284,6 +284,7 @@ static bool find_stream_and_open_codec(
 		*out_error = VX_ERR_OPEN_CODEC;
 		return false;
 	}
+	av_log_error_message(NULL, AV_LOG_DEBUG, "Opened codec: %s\n", codec->name);
 
 	// Set the time base for current stream so it can be read elsewhere
 	(*out_codec_ctx)->time_base = me->fmt_ctx->streams[*out_stream]->time_base;
@@ -416,6 +417,8 @@ cleanup:
 
 void vx_close(vx_video* video)
 {
+	av_log(NULL, AV_LOG_DEBUG, "Closing video");
+
 	if (!video) {
 		return;
 	}
@@ -1060,10 +1063,12 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 	vx_error ret = VX_ERR_UNKNOWN;
 	AVFrame* frame = NULL;
 
+	av_log(NULL, AV_LOG_DEBUG, "Stepping frame");
+
 	// Free the first item in the queue (if any)
 	if (me->frame_queue_count > 0) {
 		frame = vx_dequeue(me);
-
+		av_log(NULL, AV_LOG_DEBUG, "Freeing frame, position %i", frame->pkt_pos);
 		if (!frame) {
 			return VX_ERR_UNKNOWN;
 		}
@@ -1077,6 +1082,8 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
+
+		av_log(NULL, AV_LOG_DEBUG, "Returning frame from step, position %i", frame->pkt_pos);
 
 		// Check for audio before defaulting to video. Some codecs fail to write the picture type to frames
 		int stream_type = frame->pict_type == AV_PICTURE_TYPE_NONE && frame->nb_samples > 0
@@ -1270,10 +1277,12 @@ bool vx_get_hw_context_present(const vx_video* video)
 
 vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
 {
+	av_log(NULL, AV_LOG_DEBUG, "Getting pixel aspect ration");
 	AVRational par = video->video_codec_ctx->sample_aspect_ratio;
 	if (par.num == 0 && par.den == 1)
 		return VX_ERR_PIXEL_ASPECT;
 
 	*out_par = (float)av_q2d(par);
+	av_log(NULL, AV_LOG_DEBUG, "Returning pixel aspect ratio: %f", &out_par);
 	return VX_ERR_SUCCESS;
 }

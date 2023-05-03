@@ -29,6 +29,8 @@ static enum AVPixelFormat vx_get_hw_pixel_format(const AVBufferRef* hw_device_ct
 		av_hwframe_constraints_free(&frame_constraints);
 	}
 
+	av_log(NULL, AV_LOG_DEBUG, "Using HW pixel format for filter %i", format);
+
 	return format;
 }
 
@@ -77,6 +79,8 @@ static vx_error vx_get_video_filter_args(struct av_video_params params, int args
 		params.sample_aspect_ratio.num,
 		params.sample_aspect_ratio.den);
 
+	av_log(NULL, AV_LOG_DEBUG, "Video filter args %s\n", out_args);
+
 	return VX_ERR_SUCCESS;
 }
 
@@ -99,6 +103,8 @@ static vx_error vx_get_audio_filter_args(struct av_audio_params params, int args
 		av_get_sample_fmt_name(params.sample_format),
 		layout,
 		params.channel_layout.nb_channels);
+
+	av_log(NULL, AV_LOG_DEBUG, "Audio filter args %s\n", out_args);
 
 	return VX_ERR_SUCCESS;
 }
@@ -338,6 +344,8 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 		: &video->filter_pipeline_audio;
 	void* params = NULL;
 
+	av_log(NULL, AV_LOG_DEBUG, "Filtering frame at position %i\n", av_frame->pkt_pos);
+
 	if (*filter_graph && (*filter_graph)->nb_filters > 1) {
 		const AVFilterLink* filter_source = avfilter_graph_get_filter(*filter_graph, "in")->outputs[0];
 
@@ -353,15 +361,17 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 				.time_base = filter_source->time_base
 			};
 
-			if (!av_audio_params_equal(filter_audio_params, frame_audio_params))
+			if (!av_audio_params_equal(filter_audio_params, frame_audio_params)) {
+				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for audio frame at position %i\n", av_frame->pkt_pos);
 				params = &frame_audio_params;
+			}
 		}
 		else if (type == AVMEDIA_TYPE_VIDEO) {
 			// Reinitialize the pipeline if the frame size has changed
 			struct av_video_params frame_params = av_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
 
 			if (filter_source->w != av_frame->width || filter_source->h != av_frame->height) {
-
+				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for video frame at position %i\n", av_frame->pkt_pos);
 				params = &frame_params;
 			}
 		}
