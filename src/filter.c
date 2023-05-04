@@ -120,7 +120,7 @@ vx_error vx_get_filter_args_from_codec(const AVCodecContext* codec, int args_len
 		if (codec->hw_device_ctx)
 		{
 			format = vx_get_hw_pixel_format(codec->hw_device_ctx);
-			if (!format) {
+			if (!format || format == AV_PIX_FMT_NONE) {
 				av_log(codec, AV_LOG_ERROR, "Cannot find compatible hardware pixel format\n");
 				return VX_ERR_INIT_FILTER;
 			}
@@ -368,11 +368,18 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 		}
 		else if (type == AVMEDIA_TYPE_VIDEO) {
 			// Reinitialize the pipeline if the frame size has changed
-			struct av_video_params frame_params = av_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
+			const struct av_video_params frame_video_params = av_video_params_from_frame(av_frame, &video->fmt_ctx->streams[video->video_stream]->time_base);
+			const struct av_video_params filter_video_params = {
+				.width = filter_source->w,
+				.height = filter_source->h,
+				.pixel_format = filter_source->format,
+				.sample_aspect_ratio = filter_source->sample_aspect_ratio,
+				.time_base = filter_source->time_base
+			};
 
-			if (filter_source->w != av_frame->width || filter_source->h != av_frame->height) {
+			if (!av_video_params_equal(filter_video_params, frame_video_params)) {
 				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for video frame at position %i\n", av_frame->pkt_pos);
-				params = &frame_params;
+				params = &frame_video_params;
 			}
 		}
 

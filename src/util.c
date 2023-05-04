@@ -123,3 +123,14 @@ struct av_video_params av_video_params_from_frame(const AVFrame* frame, const AV
 
 	return params;
 }
+
+bool av_video_params_equal(const struct av_video_params a, const struct av_video_params b)
+{
+	return a.width == b.width
+		&& a.height == b.height
+		&& a.pixel_format == b.pixel_format
+		&& a.sample_aspect_ratio.den == b.sample_aspect_ratio.den
+		&& a.sample_aspect_ratio.num == b.sample_aspect_ratio.num
+		&& a.time_base.den == b.time_base.den
+		&& a.time_base.num == b.time_base.num;
+}
