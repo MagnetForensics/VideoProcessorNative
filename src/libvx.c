@@ -1090,12 +1090,12 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		av_frame_free(&frame);
 	}
 
-	av_log(NULL, AV_LOG_DEBUG, "Frame queue count: %i/%i", me->frame_count, FRAME_QUEUE_SIZE);
+	av_log(NULL, AV_LOG_DEBUG, "Frame queue count: %i/%i", me->frame_queue_count, FRAME_QUEUE_SIZE);
 
 	// (Re)fill the frame queue
 	ret = vx_queue_frames(me);
 
-	av_log(NULL, AV_LOG_DEBUG, "Frame queue refilled, count: %i/%i", me->frame_count, FRAME_QUEUE_SIZE);
+	av_log(NULL, AV_LOG_DEBUG, "Frame queue refilled, count: %i/%i", me->frame_queue_count, FRAME_QUEUE_SIZE);
 
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
