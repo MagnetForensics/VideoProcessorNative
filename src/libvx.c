@@ -803,18 +803,27 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 		if (packet && packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
 			// Skip to the next packet
 			result = -1;
+			av_log(NULL, AV_LOG_DEBUG, "Packet from stream that is not audio or video");
 			continue;
 		}
 
 		// The decoder may still hold a couple of cached frames, so even if the end of the file has been
 		// reached and no packet is returned, it still needs to be sent in order to flush the decoder
 		if (!packet || !packet->data) {
+			av_log(NULL, AV_LOG_DEBUG, "Empty packet, choosing video codec to decode packet");
 			*out_codec = me->video_codec_ctx;
 		}
 		else {
 			*out_codec = packet->stream_index == me->video_stream
 				? me->video_codec_ctx
 				: me->audio_codec_ctx;
+
+			if (out_codec == me->video_stream) {
+				av_log(NULL, AV_LOG_DEBUG, "Choosing video codec to decode packet");
+			}
+			else {
+				av_log(NULL, AV_LOG_DEBUG, "Choosing audio codec to decode packet");
+			}
 		}
 
 		result = *out_codec != NULL
@@ -856,6 +865,7 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 	while (result >= 0) {
 		frame = av_frame_alloc();
 		result = avcodec_receive_frame(codec, frame);
+		av_log(NULL, AV_LOG_DEBUG, "Recieved frame from packet");
 
 		if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
 			break;
@@ -1024,12 +1034,15 @@ vx_error vx_queue_frames(vx_video* me)
 	while (ret == VX_ERR_SUCCESS && me->frame_queue_count < FRAME_QUEUE_SIZE / 2) {
 		ret = vx_decode_frame(me, packet, &frame_buffer, &frame_count);
 
+		av_log(NULL, AV_LOG_DEBUG, "Decoded %i frames", frame_count);
+
 		if (ret != VX_ERR_SUCCESS && frame_count <= 0)
 			goto cleanup;
 
 		// The decoder usually only returns a single video frame, but there may be several audio frames
 		for (int i = 0; i < frame_count; i++) {
 			if (me->frame_queue_count < FRAME_QUEUE_SIZE) {
+				av_log(NULL, AV_LOG_DEBUG, "Queueing frame %i of %i", i, frame_count);
 				vx_enqueue(me, frame_buffer[i]);
 			}
 			else {
@@ -1077,8 +1090,12 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		av_frame_free(&frame);
 	}
 
+	av_log(NULL, AV_LOG_DEBUG, "Frame queue count: %i/%i", me->frame_count, FRAME_QUEUE_SIZE);
+
 	// (Re)fill the frame queue
 	ret = vx_queue_frames(me);
+
+	av_log(NULL, AV_LOG_DEBUG, "Frame queue refilled, count: %i/%i", me->frame_count, FRAME_QUEUE_SIZE);
 
 	if (me->frame_queue_count > 0) {
 		frame = vx_get_first_queue_item(me);
@@ -1089,6 +1106,8 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		int stream_type = frame->pict_type == AV_PICTURE_TYPE_NONE && frame->nb_samples > 0
 			? me->audio_stream
 			: me->video_stream;
+
+		av_log(NULL, AV_LOG_DEBUG, "Returning frame with picture type %i", frame->pict_type);
 
 		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
 			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
