@@ -89,7 +89,7 @@ struct vx_transcription_ctx* vx_transcription_init(const char* model_path, vx_tr
 	if (ret < 0)
 		goto cleanup;
 
-	ctx->whisper_ctx = whisper_init(model_path);
+	ctx->whisper_ctx = whisper_init_from_file(model_path);
 	if (!ctx->whisper_ctx)
 		goto cleanup;
 
