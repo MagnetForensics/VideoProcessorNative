@@ -344,7 +344,7 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 		: &video->filter_pipeline_audio;
 	void* params = NULL;
 
-	av_log(NULL, AV_LOG_DEBUG, "Filtering frame at position %i\n", av_frame->pkt_pos);
+	av_log(NULL, AV_LOG_DEBUG, "Filtering frame at ts %i\n", av_frame->best_effort_timestamp);
 
 	if (*filter_graph && (*filter_graph)->nb_filters > 1) {
 		const AVFilterLink* filter_source = avfilter_graph_get_filter(*filter_graph, "in")->outputs[0];
@@ -362,7 +362,7 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 			};
 
 			if (!av_audio_params_equal(filter_audio_params, frame_audio_params)) {
-				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for audio frame at position %i\n", av_frame->pkt_pos);
+				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for audio frame at ts %i\n", av_frame->best_effort_timestamp);
 				params = &frame_audio_params;
 			}
 		}
@@ -378,7 +378,7 @@ vx_error vx_filter_frame(const vx_video* video, AVFrame* av_frame, const enum AV
 			};
 
 			if (!av_video_params_equal(filter_video_params, frame_video_params)) {
-				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for video frame at position %i\n", av_frame->pkt_pos);
+				av_log(NULL, AV_LOG_DEBUG, "Reinitializing filtering for video frame at ts %i\n", av_frame->best_effort_timestamp);
 				params = &frame_video_params;
 			}
 		}

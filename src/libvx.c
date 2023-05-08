@@ -435,6 +435,12 @@ void vx_close(vx_video* video)
 	if (video->fmt_ctx)
 		avformat_free_context(video->fmt_ctx);
 
+	if (video->video_codec_ctx)
+		avcodec_free_context(&video->video_codec_ctx);
+
+	if (video->hw_device_ctx)
+		av_buffer_unref(&video->hw_device_ctx);
+
 	for (int i = 0; i < video->frame_queue_count; i++) {
 		av_frame_unref(video->frame_queue[i]);
 		av_frame_free(&video->frame_queue[i]);
@@ -796,8 +802,12 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 		if (packet && packet->data)
 			av_packet_unref(packet);
 
+		av_log(NULL, AV_LOG_DEBUG, "Attempting to read packet");
+
 		// Get a packet, which will usually be a single video frame, or several complete audio frames
 		vx_read_packet(me->fmt_ctx, packet, me->video_stream);
+
+		av_log(NULL, AV_LOG_DEBUG, "Packet recieved");
 
 		// Only attempt to decode packets from the streams that have been selected
 		if (packet && packet->data && (packet->stream_index != me->video_stream && packet->stream_index != me->audio_stream)) {
@@ -818,7 +828,7 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 				? me->video_codec_ctx
 				: me->audio_codec_ctx;
 
-			if (out_codec == me->video_stream) {
+			if ((*out_codec)->codec_type == AVMEDIA_TYPE_VIDEO) {
 				av_log(NULL, AV_LOG_DEBUG, "Choosing video codec to decode packet");
 			}
 			else {
@@ -840,6 +850,8 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 		ret = VX_ERR_DECODE_VIDEO;
 	}
 
+	av_log(NULL, AV_LOG_DEBUG, "Returning packet");
+
 	return ret;
 }
 
@@ -857,6 +869,7 @@ static vx_error vx_decode_frame(vx_video* me, AVPacket* packet, static AVFrame* 
 
 	// Don't decode audio frames unless audio is enabled
 	if (packet->stream_index == me->audio_stream && !me->swr_ctx) {
+		av_log(NULL, AV_LOG_DEBUG, "Skipping audio packet because audio is not initialized.");
 		ret = VX_ERR_SUCCESS;
 		goto cleanup;
 	}
@@ -1042,7 +1055,7 @@ vx_error vx_queue_frames(vx_video* me)
 		// The decoder usually only returns a single video frame, but there may be several audio frames
 		for (int i = 0; i < frame_count; i++) {
 			if (me->frame_queue_count < FRAME_QUEUE_SIZE) {
-				av_log(NULL, AV_LOG_DEBUG, "Queueing frame %i of %i", i, frame_count);
+				av_log(NULL, AV_LOG_DEBUG, "Queueing frame %i of %i", i + 1, frame_count);
 				vx_enqueue(me, frame_buffer[i]);
 			}
 			else {
@@ -1107,7 +1120,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 			? me->audio_stream
 			: me->video_stream;
 
-		av_log(NULL, AV_LOG_DEBUG, "Returning frame with picture type %i", frame->pict_type);
+		av_log(NULL, AV_LOG_DEBUG, "Returning frame from step with picture type %i", frame->pict_type);
 
 		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
 			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
