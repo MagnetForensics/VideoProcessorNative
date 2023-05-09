@@ -838,13 +838,16 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 
 		result = *out_codec != NULL
 			? avcodec_send_packet(*out_codec, packet)
-			: VX_ERR_FIND_CODEC;
-	} while (!result == AVERROR_EOF || vx_is_packet_error(result));
+			: AVERROR_DECODER_NOT_FOUND;
+		av_log(NULL, AV_LOG_DEBUG, "avcodec_send_packet result %s", av_err2str(result));
+	} while (vx_is_packet_error(result));
 
 	if (result == AVERROR_EOF) {
+		av_log(NULL, AV_LOG_DEBUG, "Unable to decode packet, EOF");
 		ret = VX_ERR_EOF;
 	}
 	else if (vx_is_packet_error(result)) {
+		av_log(NULL, AV_LOG_DEBUG, "Unable to decode packet, error");
 		av_log_error_message(result, AV_LOG_ERROR, "Unable to decode packet: %s\n");
 
 		ret = VX_ERR_DECODE_VIDEO;
