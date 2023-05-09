@@ -1120,7 +1120,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 			? me->audio_stream
 			: me->video_stream;
 
-		av_log(NULL, AV_LOG_DEBUG, "Returning frame from step with picture type %i", frame->pict_type);
+		av_log(NULL, AV_LOG_DEBUG, "Returning frame from step with picture format %i", frame->format);
 
 		double ts = frame->best_effort_timestamp != AV_NOPTS_VALUE && frame->best_effort_timestamp > 0
 			? vx_timestamp_to_seconds(me, stream_type, frame->best_effort_timestamp)
