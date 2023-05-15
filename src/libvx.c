@@ -741,6 +741,12 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 
 		if (vx_frame_init_audio_buffer(frame, params, video->options.audio_params, video->audio_codec_ctx->frame_size) <= 0)
 			goto error;
+
+		if (video->options.audio_params.transcribe) {
+			frame->audio_info.transcription = vx_transcription_buffer_init(10);
+			if (!frame->audio_info.transcription)
+				goto error;
+		}
 	}
 
 	if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
@@ -764,13 +770,8 @@ void vx_frame_destroy(vx_frame* me)
 		av_freep(&me->audio_buffer);
 	}
 
-	for (int i = 0; i < 10; i++) {
-		//const vx_transcription_segment* segment = &me->audio_info.transcription[i];
-		//if (segment->text)
-		//	free(*segment->text);
-		//if (segment->language)
-		//	free(*segment->language);
-	}
+	if (me->audio_info.transcription)
+		vx_transcription_buffer_free(&me->audio_info.transcription, 10);
 
 	free(me);
 }

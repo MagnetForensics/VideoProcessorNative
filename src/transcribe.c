@@ -52,16 +52,39 @@ static enum whisper_sampling_strategy vx_to_whisper_strategy(vx_transcription_st
 	return strategies[strategy];
 }
 
-static vx_transcription_segment* vx_transcription_segment_init()
+static vx_error vx_transcription_segment_init(vx_transcription_segment* segment)
 {
-	vx_transcription_segment* segment = calloc(1, sizeof(vx_transcription_segment));
 	if (!segment)
-		return NULL;
+		return VX_ERR_UNKNOWN;
 
+	segment->ts_start = 0;
+	segment->ts_end = 0;
 	segment->text = calloc(WHISPER_TEXT_MAX_LENGTH + 1, sizeof(char));
+	segment->length = 0;
 	segment->language = calloc(WHISPER_LANGUAGE_MAX_LENGTH + 1, sizeof(char));
 
-	return segment;
+	return segment->text == NULL || segment->language == NULL
+		? VX_ERR_ALLOCATE
+		: VX_ERR_SUCCESS;
+}
+
+vx_transcription_segment* vx_transcription_buffer_init(int capacity)
+{
+	vx_transcription_segment* buffer = malloc(capacity * sizeof(vx_transcription_segment));
+
+	if (buffer) {
+		for (int i = 0; i < capacity; i++) {
+			if (vx_transcription_segment_init(&buffer[i]) != VX_ERR_SUCCESS) {
+				av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription segment.\n");
+				break;
+			}
+		}
+	}
+	else {
+		av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription buffer.\n");
+	}
+
+	return buffer;
 }
 
 /// <summary>
@@ -209,14 +232,14 @@ vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_tran
 		return VX_ERR_NO_AUDIO;
 
 	if (!(*ctx)->filter_graph) {
-		av_log(NULL, AV_LOG_ERROR, "Audio filtering must be initialized before transcribing frames.");
+		av_log(NULL, AV_LOG_ERROR, "Audio filtering must be initialized before transcribing frames.\n");
 		return VX_ERR_RESAMPLE_AUDIO;
 	}
 
 	struct av_audio_params frame_audio_params = av_audio_params_from_frame(frame, NULL);
 	if (!av_audio_params_equal((*ctx)->audio_params, frame_audio_params)) {
 		// TODO: Fill in params for logging
-		av_log(NULL, AV_LOG_ERROR, "Frame audio parameters () did not match the expected format ()");
+		av_log(NULL, AV_LOG_ERROR, "Frame audio parameters () did not match the expected format ()\n");
 		//return VX_ERR_RESAMPLE_AUDIO;
 	}
 
@@ -231,7 +254,13 @@ vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_tran
 vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** samples, int sample_count, vx_transcription_segment** out_transcription, int* out_count)
 {
 	vx_error result = VX_ERR_SUCCESS;
+	*out_count = 0;
 	struct av_audio_params audio_params = VX_TRANSCRIPTION_AUDIO_PARAMS;
+
+	if (!*out_transcription || out_count <= 0) {
+		av_log(NULL, AV_LOG_ERROR, "Unable to transcribe audio samples, output buffer is not initialized or does not have sufficient capacity.\n");
+		return VX_ERR_UNKNOWN;
+	}
 
 	if ((*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
 		// Buffer audio if there is not enough for transcription
@@ -279,28 +308,21 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 		int keep_ms = 200;
 		const int n_segments = whisper_full_n_segments((*ctx)->whisper_ctx);
 
-		if (n_segments > 0) {
-			*out_transcription = malloc(n_segments * sizeof(vx_transcription_segment*));
-			if (!out_transcription)
-				return VX_ERR_ALLOCATE;
-		}
-
 		for (int i = 0; i < n_segments; i++) {
-			vx_transcription_segment* segment = vx_transcription_segment_init();
+			vx_transcription_segment* segment = &(*out_transcription)[i];
 			const char* text = whisper_full_get_segment_text((*ctx)->whisper_ctx, i);
 
 			const int64_t t0 = params.token_timestamps ? whisper_full_get_segment_t0((*ctx)->whisper_ctx, i) : 0;
 			const int64_t t1 = params.token_timestamps ? whisper_full_get_segment_t1((*ctx)->whisper_ctx, i) : 0;
+			const char* language = whisper_lang_str(whisper_full_lang_id((*ctx)->whisper_ctx));
 
 			// Timestamps in milliseconds
 			segment->ts_start = max((t0 * 10) - keep_ms, 0);
 			segment->ts_end = max((t1 * 10) - keep_ms, 0);
 			strcpy_s(segment->text, WHISPER_TEXT_MAX_LENGTH + 1, text);
-			segment->text_length = (int)strlen(text);
-			//transcription->language = whisper_full_lang_id(video->whisper_ctx); // TODO: Available in latest version of whisper.cpp
-			strcpy_s(segment->language, WHISPER_LANGUAGE_MAX_LENGTH + 1, "en");
+			segment->length = (int)strlen(text);
+			strcpy_s(segment->language, WHISPER_LANGUAGE_MAX_LENGTH + 1, language != NULL ? language : "");
 
-			out_transcription[i] = segment;
 			(*out_count)++;
 		}
 
@@ -334,7 +356,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 	return result;
 }
 
-void vx_transcription_segment_free(vx_transcription_segment* segment)
+static void vx_transcription_segment_free(vx_transcription_segment* segment)
 {
 	if (segment) {
 		if (segment->text)
@@ -344,6 +366,13 @@ void vx_transcription_segment_free(vx_transcription_segment* segment)
 			free(segment->language);
 
 		free(segment);
+	}
+}
+
+void vx_transcription_buffer_free(vx_transcription_segment** buffer, int capacity)
+{
+	for (int i = 0; i < capacity; i++) {
+		vx_transcription_segment_free(buffer[i]);
 	}
 }
 

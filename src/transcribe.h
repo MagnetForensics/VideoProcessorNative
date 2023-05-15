@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define VX_TRANSCRIPTION_AUDIO_PARAMS { AV_CHANNEL_LAYOUT_STEREO, AV_SAMPLE_FMT_FLTP, WHISPER_SAMPLE_RATE, { 0, 1 } }
+#define VX_TRANSCRIPTION_AUDIO_PARAMS { AV_CHANNEL_LAYOUT_MONO, AV_SAMPLE_FMT_FLTP, WHISPER_SAMPLE_RATE, { 0, 1 } }
 
 //typedef struct vx_transcription_segment vx_transcription_segment;
 typedef struct vx_transcription_ctx vx_transcription_ctx;
@@ -28,10 +28,11 @@ typedef struct vx_transcription_segment
 	int64_t ts_start;
 	int64_t ts_end;
 	char* text;
-	int text_length;
-	//char language[2]; // whisper.cpp supports this from v1.20
+	int length;
 	char* language;
 } vx_transcription_segment;
+
+	vx_transcription_segment* vx_transcription_buffer_init(int capacity);
 
 	/// <summary>
 	/// Initialize a transcription context with the specified model and strategy.
@@ -59,6 +60,7 @@ typedef struct vx_transcription_segment
 	/// <param name="ctx">A pre-initialized transcription context</param>
 	/// <param name=frame">Audio frame input</param>
 	/// <param name="out_transcription">The transcribed audio content</param>
+	/// <param name="out_count">The number of transcribed segments</param>
 	vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_transcription_segment** out_transcription, int* out_count);
 
 	/// <summary>
@@ -73,9 +75,11 @@ typedef struct vx_transcription_segment
 	/// <param name="samples">Planar audio samples</param>
 	/// <param name="sample_count">The number of samples per channel</param>
 	/// <param name="out_transcription">The transcribed audio content</param>
+	/// <param name="out_count">The number of transcribed segments</param>
 	vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** samples, int sample_count, vx_transcription_segment** out_transcription, int* out_count);
 
 	void vx_transcription_free(vx_transcription_ctx** ctx);
+	void vx_transcription_buffer_free(vx_transcription_segment** buffer, int capacity);
 
 #ifdef __cplusplus
 }
