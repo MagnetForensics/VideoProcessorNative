@@ -272,7 +272,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 			sample_count,
 			audio_params.channel_layout.nb_channels,
 			audio_params.sample_format);
-
+		
 		if (copy_result < 0)
 			return VX_ERR_RESAMPLE_AUDIO;
 
@@ -330,7 +330,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 		samples_to_keep += (int)(((double)keep_ms / 1000) * audio_params.sample_rate);
 
 		if (samples_to_keep > 0)
-			av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, 0, (*ctx)->sample_count - samples_to_keep, samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+			av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)(*ctx)->audio_buffer, 0, (*ctx)->sample_count - samples_to_keep, samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
 		av_samples_set_silence((*ctx)->audio_buffer, samples_to_keep, ((*ctx)->audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
 		(*ctx)->sample_count = samples_to_keep;
 
@@ -343,7 +343,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 			const int token_count = whisper_full_n_tokens((*ctx)->whisper_ctx, last_segment);
 			const int token_offset = token_count - min(token_count, params.max_tokens);
 			for (int j = token_offset; j < min(token_count, params.max_tokens); ++j) {
-				(*ctx)->hint_tokens[j] = (whisper_full_get_token_id((*ctx)->whisper_ctx, last_segment, j));
+				(*ctx)->hint_tokens[j] = whisper_full_get_token_id((*ctx)->whisper_ctx, last_segment, j);
 				(*ctx)->hint_token_count++;
 			}
 		}
