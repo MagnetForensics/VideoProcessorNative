@@ -1153,30 +1153,28 @@ vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, 
 	AVFrame* sw_frame = NULL;
 
 	// Copy the frame from GPU memory if it has been hardware decoded
-	bool hw_decoded = av_frame->hw_frames_ctx;
-	if (hw_decoded)
+	if (av_frame->hw_frames_ctx)
 	{
 		sw_frame = av_frame_alloc();
 
 		if (!sw_frame) {
 			result = VX_ERR_ALLOCATE;
-			goto end;
+			goto cleanup;
 		}
 
-		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0)
+		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0 | av_frame_copy_props(sw_frame, av_frame) < 0)
 		{
 			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
-			av_frame_unref(sw_frame);
-			av_frame_free(&sw_frame);
-
-			goto end;
+			goto cleanup;
 		}
 
-		av_frame = sw_frame;
+		// Replace the existing frame with the newly transferred data
+		av_frame_unref(av_frame);
+		av_frame_move_ref(av_frame, sw_frame);
 	}
 
 	if (vx_filter_frame(video, av_frame, AVMEDIA_TYPE_VIDEO) != VX_ERR_SUCCESS) {
-		goto end;
+		goto cleanup;
 	}
 
 	// The frame dimensions may have changed since it was initialized
@@ -1187,20 +1185,20 @@ vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, 
 		frame->height = av_frame->height;
 
 		if (vx_frame_init_buffer(frame) != VX_ERR_SUCCESS)
-			goto end;
+			goto cleanup;
 	}
 
 	// Fill the buffer
 	if (vx_scale_frame(av_frame, frame) != VX_ERR_SUCCESS) {
-		goto end;
+		goto cleanup;
 	}
 
 	result = VX_ERR_SUCCESS;
 
-end:
-	if (hw_decoded) {
-		av_frame_unref(av_frame);
-		av_frame_free(&av_frame);
+cleanup:
+	if (sw_frame) {
+		av_frame_unref(sw_frame);
+		av_frame_free(&sw_frame);
 	}
 
 	return result;
