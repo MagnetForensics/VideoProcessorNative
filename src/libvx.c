@@ -1150,27 +1150,27 @@ vx_error vx_frame_transfer_audio_data(const vx_video* video, AVFrame* av_frame, 
 vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, vx_frame* frame)
 {
 	vx_error result = VX_ERR_UNKNOWN;
-	AVFrame* sw_frame = NULL;
+	AVFrame* hw_frame = NULL;
 
 	// Copy the frame from GPU memory if it has been hardware decoded
 	if (av_frame->hw_frames_ctx)
 	{
-		sw_frame = av_frame_alloc();
+		hw_frame = av_frame_alloc();
 
-		if (!sw_frame) {
+		if (!hw_frame) {
 			result = VX_ERR_ALLOCATE;
 			goto cleanup;
 		}
 
-		if (av_hwframe_transfer_data(sw_frame, av_frame, 0) < 0 | av_frame_copy_props(sw_frame, av_frame) < 0)
+		// Transfer the hardware frame to a temporary frame
+		av_frame_move_ref(hw_frame, av_frame);
+
+		// Copy the data and properties from the temporary hardware frame
+		if (av_hwframe_transfer_data(av_frame, hw_frame, 0) < 0 | av_frame_copy_props(av_frame, hw_frame) < 0)
 		{
 			av_log(NULL, AV_LOG_ERROR, "Error transferring frame data to system memory\n");
 			goto cleanup;
 		}
-
-		// Replace the existing frame with the newly transferred data
-		av_frame_unref(av_frame);
-		av_frame_move_ref(av_frame, sw_frame);
 	}
 
 	if (vx_filter_frame(video, av_frame, AVMEDIA_TYPE_VIDEO) != VX_ERR_SUCCESS) {
@@ -1196,9 +1196,9 @@ vx_error vx_frame_transfer_video_data(const vx_video* video, AVFrame* av_frame, 
 	result = VX_ERR_SUCCESS;
 
 cleanup:
-	if (sw_frame) {
-		av_frame_unref(sw_frame);
-		av_frame_free(&sw_frame);
+	if (hw_frame) {
+		av_frame_unref(hw_frame);
+		av_frame_free(&hw_frame);
 	}
 
 	return result;
