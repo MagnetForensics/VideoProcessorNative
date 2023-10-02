@@ -416,9 +416,7 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 				error = VX_ERR_ALLOCATE;
 				goto cleanup;
 			}
-			// Transcription occurs after resampling so further filtering needs to be from the
-			// resampled audio format, not from the original source format
-			params.sample_rate = me->options.audio_params.sample_rate;
+
 			if ((error = vx_transcription_initialize_audio_conversion(&me->transcription_ctx, params)) != VX_ERR_SUCCESS)
 				goto cleanup;
 		}

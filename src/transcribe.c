@@ -92,21 +92,20 @@ vx_transcription_segment* vx_transcription_buffer_init(int capacity)
 /// </summary>
 struct vx_transcription_ctx* vx_transcription_init(const char* model_path, vx_transcription_strategy strategy)
 {
-	struct av_audio_params default_params = VX_TRANSCRIPTION_AUDIO_PARAMS;
 	vx_transcription_ctx* ctx = calloc(1, sizeof(vx_transcription_ctx));
 	if (!ctx)
 		goto cleanup;
 
 	// Audio input is assumed to be in the correct format, unless set via filtering
-	ctx->audio_params = default_params;
+	ctx->audio_params = (struct av_audio_params)VX_TRANSCRIPTION_AUDIO_PARAMS;
 	ctx->strategy = vx_to_whisper_strategy(strategy);
 
 	int ret = av_samples_alloc_array_and_samples(
 		&ctx->audio_buffer,
 		NULL,
-		default_params.channel_layout.nb_channels,
+		ctx->audio_params.channel_layout.nb_channels,
 		AUDIO_BUFFER_MAX_SAMPLES,
-		default_params.sample_format,
+		ctx->audio_params.sample_format,
 		0);
 
 	if (ret < 0)
@@ -202,11 +201,6 @@ vx_error vx_transcription_initialize_audio_conversion(vx_transcription_ctx** ctx
 
 	(*ctx)->audio_params = params;
 
-	// Whisper only supports two channels, or mono
-	AVChannelLayout layout = { 0 };
-	av_channel_layout_default(&layout, WHISPER_CHANNEL_COUNT);
-	(*ctx)->audio_params.channel_layout = layout;
-
 	if ((result = vx_get_audio_filter_args(params, sizeof(filter_args), &filter_args)) != VX_ERR_SUCCESS)
 		goto end;
 
@@ -238,9 +232,10 @@ vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_tran
 
 	struct av_audio_params frame_audio_params = av_audio_params_from_frame(frame, NULL);
 	if (!av_audio_params_equal((*ctx)->audio_params, frame_audio_params)) {
-		// TODO: Fill in params for logging
-		av_log(NULL, AV_LOG_ERROR, "Frame audio parameters () did not match the expected format ()\n");
-		//return VX_ERR_RESAMPLE_AUDIO;
+		av_log(NULL, AV_LOG_WARNING, "Frame audio parameters did not match the expected format for transcription.\n Attempting to re-initialize audio conversion.");
+		if (vx_transcription_initialize_audio_conversion(ctx, frame_audio_params) != VX_ERR_SUCCESS) {
+			return VX_ERR_RESAMPLE_AUDIO;
+		}
 	}
 
 	if ((result = vx_filtergraph_process_frame(&(*ctx)->filter_graph, frame)) != VX_ERR_SUCCESS)
@@ -263,7 +258,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 	}
 
 	if ((*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
-		// Buffer audio if there is not enough for transcription
+		// Buffer audio if there is not enough samples for transcription
 		int copy_result = av_samples_copy(
 			(*ctx)->audio_buffer,
 			(const uint8_t* const*)samples,
@@ -331,7 +326,7 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 
 		if (samples_to_keep > 0)
 			av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)(*ctx)->audio_buffer, 0, (*ctx)->sample_count - samples_to_keep, samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
-		av_samples_set_silence((*ctx)->audio_buffer, samples_to_keep, ((*ctx)->audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+		av_samples_set_silence((*ctx)->audio_buffer, samples_to_keep, (audio_params.sample_rate * AUDIO_BUFFER_SECONDS) - samples_to_keep, audio_params.channel_layout.nb_channels, audio_params.sample_format);
 		(*ctx)->sample_count = samples_to_keep;
 
 		// Add tokens of the last full length segment as the prompt
