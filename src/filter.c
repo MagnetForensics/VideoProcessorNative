@@ -173,7 +173,7 @@ static vx_error vx_initialize_crop_filter(AVFilterContext** last_filter, const i
 	char args[100];
 
 	if (crop_area.width <= 0 || crop_area.height <= 0 || !vx_rectangle_contains(frame_area, crop_area)) {
-		av_log(NULL, AV_LOG_FATAL, "The specified crop area is not valid for this video.\n");
+		av_log(NULL, AV_LOG_FATAL, "The specified crop area (x:%d, y:%d, w:%d, h:%d) is not valid for this video.\n", crop_area.x, crop_area.y, crop_area.width, crop_area.height);
 		return VX_ERR_INIT_FILTER;
 	}
 
