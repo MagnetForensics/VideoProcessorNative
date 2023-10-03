@@ -359,27 +359,32 @@ static void vx_transcription_segment_free(vx_transcription_segment* segment)
 
 		if (segment->language)
 			free(segment->language);
-
-		free(segment);
 	}
 }
 
-void vx_transcription_buffer_free(vx_transcription_segment** buffer, int capacity)
+void vx_transcription_buffer_free(vx_transcription_segment* buffer, int capacity)
 {
 	for (int i = 0; i < capacity; i++) {
-		vx_transcription_segment_free(buffer[i]);
+		vx_transcription_segment_free(&buffer[i]);
 	}
+
+	free(buffer);
 }
 
 void vx_transcription_free(vx_transcription_ctx** ctx)
 {
 	if (ctx) {
 		if ((*ctx)->whisper_ctx)
-			free(&(*ctx)->whisper_ctx);
+			free((*ctx)->whisper_ctx);
 
-		if ((*ctx)->audio_buffer)
-			free(&(*ctx)->audio_buffer);
+		if ((*ctx)->filter_graph)
+			avfilter_graph_free(&(*ctx)->filter_graph);
 
-		free(ctx);
+		if ((*ctx)->audio_buffer) {
+			av_freep(&(*ctx)->audio_buffer[0]);
+			av_freep(&(*ctx)->audio_buffer);
+		}
+
+		free(*ctx);
 	}
 }

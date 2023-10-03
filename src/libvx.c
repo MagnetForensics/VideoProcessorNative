@@ -27,6 +27,7 @@
 #endif
 
 #define FRAME_BUFFER_PADDING 4096
+#define FRAME_TRANSCRIPTION_CAPACITY 10
 #define LOG_TRACE_BUFSIZE 4096
 
 static bool initialized = false;
@@ -741,7 +742,7 @@ vx_frame* vx_frame_create(const vx_video* video, int width, int height, vx_pix_f
 			goto error;
 
 		if (video->options.audio_params.transcribe) {
-			frame->audio_info.transcription = vx_transcription_buffer_init(10);
+			frame->audio_info.transcription = vx_transcription_buffer_init(FRAME_TRANSCRIPTION_CAPACITY);
 			if (!frame->audio_info.transcription)
 				goto error;
 		}
@@ -769,7 +770,7 @@ void vx_frame_destroy(vx_frame* me)
 	}
 
 	if (me->audio_info.transcription)
-		vx_transcription_buffer_free(&me->audio_info.transcription, 10);
+		vx_transcription_buffer_free(me->audio_info.transcription, FRAME_TRANSCRIPTION_CAPACITY);
 
 	free(me);
 }

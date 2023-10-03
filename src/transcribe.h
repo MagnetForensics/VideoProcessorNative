@@ -79,7 +79,7 @@ typedef struct vx_transcription_segment
 	vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** samples, int sample_count, vx_transcription_segment** out_transcription, int* out_count);
 
 	void vx_transcription_free(vx_transcription_ctx** ctx);
-	void vx_transcription_buffer_free(vx_transcription_segment** buffer, int capacity);
+	void vx_transcription_buffer_free(vx_transcription_segment* buffer, int capacity);
 
 #ifdef __cplusplus
 }
