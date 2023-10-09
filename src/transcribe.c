@@ -30,7 +30,7 @@
 #define WHISPER_TEXT_MAX_LENGTH 255
 #define WHISPER_LANGUAGE_MAX_LENGTH 2
 #define WHISPER_HINT_TOKENS_COUNT 32
-#define AUDIO_BUFFER_SECONDS 4
+#define AUDIO_BUFFER_SECONDS 30
 #define AUDIO_BUFFER_MAX_SAMPLES AUDIO_BUFFER_SECONDS * WHISPER_SAMPLE_RATE
 
 struct vx_transcription_ctx {
@@ -282,10 +282,10 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 	params.print_progress = false;
 	params.n_threads = 8; // TODO: Set dynamically
 	params.duration_ms = 0; // Use all the provided samples
-	params.no_context = true;
+	params.no_context = false;
 	params.audio_ctx = 0;
 	params.token_timestamps = true;
-	params.max_tokens = 32;
+	params.max_tokens = WHISPER_HINT_TOKENS_COUNT;
 	params.prompt_tokens = (*ctx)->hint_tokens;
 	params.prompt_n_tokens = (*ctx)->hint_token_count;
 
