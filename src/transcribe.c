@@ -258,8 +258,6 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 		return VX_ERR_UNKNOWN;
 	}
 
-	//TODO copy recieved samples to buffer
-
 	if (samples && (*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
 		// Buffer audio if there are not enough samples for transcription
 		int copy_result = av_samples_copy(
