@@ -1264,6 +1264,9 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 		goto cleanup;
 	}
 
+	// Clear any existing transcription so the array can be reused
+	vx_transcription_buffer_clear(frame->audio_info.transcription, &frame->audio_info.transcription_count);
+
 	// Run the frame through the filter pipeline, if any
 	if (vx_frame_has_image(av_frame)) {
 		if ((ret = vx_frame_transfer_video_data(video, av_frame, frame)) != VX_ERR_SUCCESS) {

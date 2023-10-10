@@ -86,8 +86,9 @@ typedef struct vx_transcription_segment
 	/// <param name="out_count">The number of transcribed segments</param>
 	vx_error vx_transcription_flush(vx_transcription_ctx** ctx, vx_transcription_segment** out_transcription, int* out_count);
 
-	void vx_transcription_free(vx_transcription_ctx** ctx);
+	void vx_transcription_buffer_clear(vx_transcription_segment* buffer, int* count);
 	void vx_transcription_buffer_free(vx_transcription_segment* buffer, int capacity);
+	void vx_transcription_free(vx_transcription_ctx** ctx);
 
 #ifdef __cplusplus
 }

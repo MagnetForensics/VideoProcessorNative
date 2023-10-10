@@ -68,25 +68,6 @@ static vx_error vx_transcription_segment_init(vx_transcription_segment* segment)
 		: VX_ERR_SUCCESS;
 }
 
-vx_transcription_segment* vx_transcription_buffer_init(int capacity)
-{
-	vx_transcription_segment* buffer = malloc(capacity * sizeof(vx_transcription_segment));
-
-	if (buffer) {
-		for (int i = 0; i < capacity; i++) {
-			if (vx_transcription_segment_init(&buffer[i]) != VX_ERR_SUCCESS) {
-				av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription segment.\n");
-				break;
-			}
-		}
-	}
-	else {
-		av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription buffer.\n");
-	}
-
-	return buffer;
-}
-
 /// <summary>
 /// Create a new transcription context, returns NULL on error.
 /// </summary>
@@ -352,6 +333,10 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 		av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, (*ctx)->sample_count, 0, sample_count, audio_params.channel_layout.nb_channels, audio_params.sample_format);
 		(*ctx)->sample_count += sample_count;
 	}
+	else {
+		av_samples_set_silence((*ctx)->audio_buffer, 0, audio_params.sample_rate * AUDIO_BUFFER_SECONDS, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+		(*ctx)->sample_count = 0;
+	}
 
 	return result;
 }
@@ -363,6 +348,39 @@ vx_error vx_transcription_flush(vx_transcription_ctx** ctx, vx_transcription_seg
 	result = vx_transcribe_samples(ctx, NULL, 0, out_transcription, out_count);
 
 	return result;
+}
+
+vx_transcription_segment* vx_transcription_buffer_init(int capacity)
+{
+	vx_transcription_segment* buffer = malloc(capacity * sizeof(vx_transcription_segment));
+
+	if (buffer) {
+		for (int i = 0; i < capacity; i++) {
+			if (vx_transcription_segment_init(&buffer[i]) != VX_ERR_SUCCESS) {
+				av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription segment.\n");
+				break;
+			}
+		}
+	}
+	else {
+		av_log(NULL, AV_LOG_ERROR, "Unable to allocate transcription buffer.\n");
+	}
+
+	return buffer;
+}
+
+void vx_transcription_buffer_clear(vx_transcription_segment* buffer, int* count)
+{
+	for (int i = 0; i < *count; i++) {
+		vx_transcription_segment* segment = &buffer[i];
+		segment->ts_start = 0;
+		segment->ts_end = 0;
+		strcpy_s(segment->text, WHISPER_TEXT_MAX_LENGTH + 1, "");
+		segment->length = 0;
+		strcpy_s(segment->language, WHISPER_LANGUAGE_MAX_LENGTH + 1, "");
+	}
+
+	*count = 0;
 }
 
 static void vx_transcription_segment_free(vx_transcription_segment* segment)
