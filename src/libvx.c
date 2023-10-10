@@ -29,6 +29,7 @@
 #define FRAME_BUFFER_PADDING 4096
 #define FRAME_TRANSCRIPTION_CAPACITY 10
 #define LOG_TRACE_BUFSIZE 4096
+#define AV_FRAME_FLAG_LAST (1 << 20)
 
 static bool initialized = false;
 static int retry_count = 100;
@@ -58,6 +59,7 @@ struct vx_frame
 	vx_pix_fmt pix_fmt;
 	int sample_count;
 	int max_samples;
+	bool is_final_frame;
 
 	vx_audio_info audio_info;
 	vx_scene_info scene_info;
@@ -846,6 +848,10 @@ static vx_error vx_decode_next_packet(vx_video* me, AVPacket* packet, AVCodecCon
 		result = *out_codec != NULL
 			? avcodec_send_packet(*out_codec, packet)
 			: VX_ERR_FIND_CODEC;
+
+	// Keep trying to decode packets until one is successfully received,
+	// or the end of the file is reached. This allows decoding to continue
+	// through the entire video even if some packets cannot be read.
 	} while (!result == AVERROR_EOF || vx_is_packet_error(result));
 
 	if (result == AVERROR_EOF) {
@@ -1067,6 +1073,12 @@ vx_error vx_queue_frames(vx_video* me)
 	}
 
 cleanup:
+	// Mark the last frame in case any special handling is required later
+	if (ret == VX_ERR_EOF && me->frame_queue_count == 1) {
+		AVFrame* frame = me->frame_queue[me->frame_queue_count - 1];
+		frame->flags |= AV_FRAME_FLAG_LAST;
+	}
+
 	if (ret != VX_ERR_SUCCESS) {
 		for (int i = frame_idx; i < frame_count; i++) {
 			AVFrame* frame = frame_buffer[i];
@@ -1131,8 +1143,8 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 			frame_info->flags |= frame->pkt_pos < 0 ? VX_FF_BYTE_POS_GUESSED : 0;
 		frame_info->flags |= frame->pts > 0 ? VX_FF_HAS_PTS : 0;
 
-		// Override errors that may be returned when queuing frames until
-		// the frame queue is processed
+		// Override errors that may be returned when queuing frames e.g. EOF
+		// until the frame queue is fully processed
 		ret = VX_ERR_SUCCESS;
 	}
 
@@ -1265,6 +1277,13 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 	else {
 		av_log(NULL, AV_LOG_WARNING, "A frame did not contain either audio or video data so the buffer could not be transferred\n");
+	}
+
+	// Clear any buffered transcription data, regardless of frame type
+	if (video->options.audio_params.transcribe && av_frame->flags & AV_FRAME_FLAG_LAST) {
+		if ((ret = vx_transcription_flush(&video->transcription_ctx, &frame->audio_info.transcription, &frame->audio_info.transcription_count)) != VX_ERR_SUCCESS) {
+			goto cleanup;
+		}
 	}
 
 	// Frame properties that may have been updated after filtering

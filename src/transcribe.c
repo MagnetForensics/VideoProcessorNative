@@ -222,6 +222,7 @@ end:
 vx_error vx_transcribe_frame(vx_transcription_ctx** ctx, AVFrame* frame, vx_transcription_segment** out_transcription, int* out_count)
 {
 	vx_error result = VX_ERR_SUCCESS;
+
 	if (!frame || frame->nb_samples <= 0)
 		return VX_ERR_NO_AUDIO;
 
@@ -257,8 +258,10 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 		return VX_ERR_UNKNOWN;
 	}
 
-	if ((*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
-		// Buffer audio if there is not enough samples for transcription
+	//TODO copy recieved samples to buffer
+
+	if (samples && (*ctx)->sample_count + sample_count < AUDIO_BUFFER_MAX_SAMPLES) {
+		// Buffer audio if there are not enough samples for transcription
 		int copy_result = av_samples_copy(
 			(*ctx)->audio_buffer,
 			(const uint8_t* const*)samples,
@@ -290,9 +293,11 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 	params.prompt_n_tokens = (*ctx)->hint_token_count;
 
 	// Whisper processes the audio in 1 second chunks but anything smaller will be discarded
-	// Save any remaining samples to be processed with the next batch
-	// TODO: Handle processing of all remaining samples on last frame. Pad with silence?
-	int samples_to_keep = (*ctx)->sample_count % audio_params.sample_rate;
+	// Save any remaining samples to be processed with the next batch. However all remaining
+	// samples should be processed if flushing
+	int samples_to_keep = samples
+		? (*ctx)->sample_count % audio_params.sample_rate
+		: 0;
 	int samples_to_process = (*ctx)->sample_count - samples_to_keep;
 
 	// For packed sample formats, only the first data plane is used, and samples for each channel are interleaved.
@@ -345,8 +350,19 @@ vx_error vx_transcribe_samples(vx_transcription_ctx** ctx, const uint8_t** sampl
 	}
 
 	// Finally, store the samples that would not fit
-	av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, (*ctx)->sample_count, 0, sample_count, audio_params.channel_layout.nb_channels, audio_params.sample_format);
-	(*ctx)->sample_count += sample_count;
+	if (samples && sample_count > 0) {
+		av_samples_copy((*ctx)->audio_buffer, (const uint8_t* const*)samples, (*ctx)->sample_count, 0, sample_count, audio_params.channel_layout.nb_channels, audio_params.sample_format);
+		(*ctx)->sample_count += sample_count;
+	}
+
+	return result;
+}
+
+vx_error vx_transcription_flush(vx_transcription_ctx** ctx, vx_transcription_segment** out_transcription, int* out_count)
+{
+	vx_error result = VX_ERR_SUCCESS;
+
+	result = vx_transcribe_samples(ctx, NULL, 0, out_transcription, out_count);
 
 	return result;
 }
