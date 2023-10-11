@@ -414,9 +414,21 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 			goto cleanup;
 
 		if (me->options.audio_params.transcribe) {
-			me->transcription_ctx = vx_transcription_init("ggml-model-whisper-base.bin", VX_STRATEGY_GREEDY);
+			char* current_directory = get_current_directory();
+			char* model_path = combine_path(current_directory, "ggml-model-whisper-base.bin");
+			if (!current_directory || !model_path) {
+				error = VX_ERR_ALLOCATE;
+				av_log(NULL, AV_LOG_ERROR, "Could not assign path for transcription model\n");
+				goto cleanup;
+			}
+			me->transcription_ctx = vx_transcription_init(model_path, VX_STRATEGY_GREEDY);
+			if (current_directory)
+				free(current_directory);
+			if (model_path)
+				free(model_path);
 			if (!me->transcription_ctx) {
 				error = VX_ERR_ALLOCATE;
+				av_log(NULL, AV_LOG_ERROR, "Could not initialize transcription model\n");
 				goto cleanup;
 			}
 
@@ -1265,7 +1277,8 @@ vx_error vx_frame_transfer_data(const vx_video* video, vx_frame* frame)
 	}
 
 	// Clear any existing transcription so the array can be reused
-	vx_transcription_buffer_clear(frame->audio_info.transcription, &frame->audio_info.transcription_count);
+	if (frame->audio_info.transcription)
+		vx_transcription_buffer_clear(frame->audio_info.transcription, &frame->audio_info.transcription_count);
 
 	// Run the frame through the filter pipeline, if any
 	if (vx_frame_has_image(av_frame)) {

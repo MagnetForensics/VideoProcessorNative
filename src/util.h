@@ -15,6 +15,8 @@ extern "C" {
 	struct av_audio_params av_audio_params_from_codec(const AVCodecContext* context);
 	struct av_audio_params av_audio_params_from_frame(const AVFrame* frame, const AVRational* time_base);
 	struct av_video_params av_video_params_from_frame(const AVFrame* frame, const AVRational* time_base);
+	char* get_current_directory();
+	char* combine_path(const char* path1, const char* path2);
 
 #ifdef __cplusplus
 }

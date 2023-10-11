@@ -2,6 +2,17 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <stdio.h>  /* defines FILENAME_MAX */
+#if defined(_WINDOWS) || defined(_WIN32) || defined(_WIN64)
+#include <direct.h>
+#define GetCurrentDir _getcwd
+#define DIR_SEPARATOR '\\'
+#else
+#include <unistd.h>
+#define GetCurrentDir getcwd
+#define DIR_SEPARATOR '/'
+#endif
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 
@@ -122,4 +133,52 @@ struct av_video_params av_video_params_from_frame(const AVFrame* frame, const AV
 	};
 
 	return params;
+}
+
+char* get_current_directory()
+{
+	char* buffer = calloc(FILENAME_MAX + 1, sizeof(char));
+	const char* result = GetCurrentDir(buffer, FILENAME_MAX);
+
+	return result
+		? buffer
+		: NULL;
+}
+
+char* combine_path(const char* path1, const char* path2)
+{
+	int destination_size = FILENAME_MAX + 1;
+	char* destination = calloc(destination_size, sizeof(char));
+
+	if (!destination)
+		return NULL;
+
+	if (path1 && *path1) {
+		size_t len = strlen(path1);
+		strcpy_s(destination, destination_size, path1);
+
+		if (destination[len - 1] == DIR_SEPARATOR) {
+			if (path2 && *path2) {
+				strcpy_s(destination + len, destination_size,(*path2 == DIR_SEPARATOR) ? (path2 + 1) : path2);
+			}
+		}
+		else {
+			if (path2 && *path2) {
+				if (*path2 == DIR_SEPARATOR)
+					strcpy_s(destination + len, destination_size, path2);
+				else {
+					destination[len] = DIR_SEPARATOR;
+					strcpy_s(destination + len + 1, destination_size, path2);
+				}
+			}
+		}
+	}
+	else if (path2 && *path2) {
+		strcpy_s(destination, destination_size, path2);
+	}
+	else {
+		destination[0] = '\0';
+	}
+
+	return destination;
 }
