@@ -83,6 +83,9 @@ static vx_log_level av_to_vx_log_level(const int level)
 	case AV_LOG_ERROR:
 		return VX_LOG_ERROR;
 
+	case AV_LOG_WARNING:
+		return VX_LOG_WARNING;
+
 	case AV_LOG_INFO:
 	case AV_LOG_VERBOSE:
 		return VX_LOG_INFO;
