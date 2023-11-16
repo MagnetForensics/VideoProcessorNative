@@ -1260,7 +1260,21 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 
 vx_error vx_get_duration(const vx_video* video, float* out_duration)
 {
-	*out_duration = (float)video->fmt_ctx->duration / (float)AV_TIME_BASE;
+	if (video->fmt_ctx->duration == AV_NOPTS_VALUE) {
+		// No valid timestamps were set for any stream
+		return 0;
+	}
+
+	int64_t video_stream_duration = video->fmt_ctx->streams[video->video_stream]->duration;
+	// Check if there is a big difference between video stream duration and combined duration
+	bool duration_discrepency = llabs(video->fmt_ctx->duration - video_stream_duration) > video_stream_duration * 2;
+
+	*out_duration = duration_discrepency
+		// Use only the video stream duration
+		? video->fmt_ctx->streams[video->video_stream]->duration * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base)
+		// Use the combined audio + video duration
+		: video->fmt_ctx->duration * av_q2d(AV_TIME_BASE_Q);
+
 	return VX_ERR_SUCCESS;
 }
 
