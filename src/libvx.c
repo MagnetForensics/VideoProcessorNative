@@ -228,7 +228,7 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 	ctx->hw_device_ctx = av_buffer_ref(me->hw_device_ctx);
 
 	// Decoder does not assign sufficient pool size for mpeg2
-	if (ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO && ctx->extra_hw_frames < 16) {
+	if ((ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO || ctx->codec_id == AV_CODEC_ID_WMV3) && ctx->extra_hw_frames < 16) {
 		ctx->extra_hw_frames = 16;
 	}
 
