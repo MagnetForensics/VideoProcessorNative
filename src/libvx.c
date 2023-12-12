@@ -218,6 +218,13 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDeviceType type)
 {
 	int err = 0;
+	bool codecRequiresExtraFrames = false;
+	enum AVCodecID extraHardwareFrameCodecs[] = 
+	{ 
+		AV_CODEC_ID_MPEG2VIDEO, 
+		AV_CODEC_ID_WMV3, 
+		AV_CODEC_ID_VC1 
+	};
 
 	if ((err = av_hwdevice_ctx_create(&me->hw_device_ctx, type, NULL, NULL, 0)) < 0)
 	{
@@ -227,8 +234,17 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 
 	ctx->hw_device_ctx = av_buffer_ref(me->hw_device_ctx);
 
-	// Decoder does not assign sufficient pool size for mpeg2
-	if ((ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO || ctx->codec_id == AV_CODEC_ID_WMV3) && ctx->extra_hw_frames < 16) {
+	for (int i = 0; i < sizeof(extraHardwareFrameCodecs) / sizeof(enum AVCodecID); i++)
+	{
+		codecRequiresExtraFrames = ctx->codec_id == extraHardwareFrameCodecs[i];
+		if (codecRequiresExtraFrames)
+		{
+			break;
+		}
+	}
+
+	// Decoder does not assign sufficient pool size for codec
+	if (codecRequiresExtraFrames && ctx->extra_hw_frames < 16) {
 		ctx->extra_hw_frames = 16;
 	}
 
