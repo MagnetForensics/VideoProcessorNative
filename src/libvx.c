@@ -183,7 +183,6 @@ static const AVCodecHWConfig* get_hw_config(const AVCodec* codec)
 	enum AVHWDeviceType type_priority[] = {
 		AV_HWDEVICE_TYPE_VDPAU,
 		AV_HWDEVICE_TYPE_D3D11VA,
-		AV_HWDEVICE_TYPE_CUDA,
 		AV_HWDEVICE_TYPE_VAAPI,
 		AV_HWDEVICE_TYPE_DXVA2,
 		AV_HWDEVICE_TYPE_QSV,
