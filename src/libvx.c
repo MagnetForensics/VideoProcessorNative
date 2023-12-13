@@ -220,9 +220,10 @@ static int hw_decoder_init(vx_video* me, AVCodecContext* ctx, const enum AVHWDev
 	bool codecRequiresExtraFrames = false;
 	enum AVCodecID extraHardwareFrameCodecs[] = 
 	{ 
+		AV_CODEC_ID_HEVC,
 		AV_CODEC_ID_MPEG2VIDEO, 
 		AV_CODEC_ID_WMV3, 
-		AV_CODEC_ID_VC1 
+		AV_CODEC_ID_VC1
 	};
 
 	if ((err = av_hwdevice_ctx_create(&me->hw_device_ctx, type, NULL, NULL, 0)) < 0)
