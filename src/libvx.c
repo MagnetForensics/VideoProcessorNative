@@ -497,8 +497,9 @@ static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int strea
 	return false;
 }
 
-vx_error vx_count_frames(vx_video* me, int* out_num_frames)
+vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info)
 {
+	out_video_info = malloc(sizeof(struct vx_video_info));
 	int num_frames = 0;
 
 	AVPacket* packet = av_packet_alloc();
@@ -507,23 +508,59 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	}
 
 	while (true) {
-		if (!vx_read_packet(me->fmt_ctx, packet, me->video_stream)) {
+		if (!vx_read_packet(video->fmt_ctx, packet, video->video_stream)) {
 			break;
 		}
 
-		if (packet->stream_index == me->video_stream) {
+		if (packet->stream_index == video->video_stream) {
 			num_frames++;
 		}
 
 		av_packet_unref(packet);
 	}
 
+	float frame_rate = 0 ;
+	vx_get_frame_rate(video, &frame_rate);
+	out_video_info->width = vx_get_width(video);
+	out_video_info->height = vx_get_height(video);
+	out_video_info->adjusted_width = vx_get_adjusted_width(video);
+	out_video_info->adjusted_height = vx_get_adjusted_height(video);
+	out_video_info->frame_rate = frame_rate;
+	out_video_info->frame_count = num_frames;
+	out_video_info->duration = video->fmt_ctx->duration / AV_TIME_BASE;
+	out_video_info->audio_present = video->audio_codec_ctx != NULL;
+	out_video_info->audio_sample_rate = video->audio_codec_ctx ? video->audio_codec_ctx->sample_rate : 0;
+	out_video_info->audio_channels = video->audio_codec_ctx ? video->audio_codec_ctx->channels : 0;
+
 	av_packet_unref(packet);
 	av_packet_free(&packet);
 
-	*out_num_frames = num_frames;
+
 
 	return VX_ERR_SUCCESS;
+
+	
+		//int width;
+		//int height;
+		//int adjusted_width;
+		//int adjusted_height;
+		//float frame_rate;
+		//int frame_count;
+		//float duration;
+		//int audio_present;
+		//int audio_sample_rate;
+		//int audio_channels;
+
+	//audioChannelCount = new Lazy<int>(() = > LibVx.vx_get_audio_channels(video));
+	//audioSampleRate = new Lazy<int>(() = > LibVx.vx_get_audio_sample_rate(video));
+	//frameCount = new Lazy<int>(getFrameCount());
+	//frameRate = new Lazy<float>(() = > GetFrameRate(video));
+	//duration = new Lazy<TimeSpan>(() = > GetDuration(video));
+	//hasAudio = new Lazy<int>(() = > LibVx.vx_get_audio_present(video));
+	//height = new Lazy<int>(() = > LibVx.vx_get_adjusted_height(video));
+	//width = new Lazy<int>(() = > LibVx.vx_get_adjusted_width(video));
+	//originalHeight = new Lazy<int>(() = > LibVx.vx_get_height(video));
+	//originalWidth = new Lazy<int>(() = > LibVx.vx_get_width(video));
 }
 
 static bool vx_video_is_rotated(vx_video video)
