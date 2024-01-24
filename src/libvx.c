@@ -499,7 +499,6 @@ static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int strea
 
 vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info)
 {
-	out_video_info = malloc(sizeof(struct vx_video_info));
 	int num_frames = 0;
 
 	AVPacket* packet = av_packet_alloc();
@@ -535,32 +534,7 @@ vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info
 	av_packet_unref(packet);
 	av_packet_free(&packet);
 
-
-
 	return VX_ERR_SUCCESS;
-
-	
-		//int width;
-		//int height;
-		//int adjusted_width;
-		//int adjusted_height;
-		//float frame_rate;
-		//int frame_count;
-		//float duration;
-		//int audio_present;
-		//int audio_sample_rate;
-		//int audio_channels;
-
-	//audioChannelCount = new Lazy<int>(() = > LibVx.vx_get_audio_channels(video));
-	//audioSampleRate = new Lazy<int>(() = > LibVx.vx_get_audio_sample_rate(video));
-	//frameCount = new Lazy<int>(getFrameCount());
-	//frameRate = new Lazy<float>(() = > GetFrameRate(video));
-	//duration = new Lazy<TimeSpan>(() = > GetDuration(video));
-	//hasAudio = new Lazy<int>(() = > LibVx.vx_get_audio_present(video));
-	//height = new Lazy<int>(() = > LibVx.vx_get_adjusted_height(video));
-	//width = new Lazy<int>(() = > LibVx.vx_get_adjusted_width(video));
-	//originalHeight = new Lazy<int>(() = > LibVx.vx_get_height(video));
-	//originalWidth = new Lazy<int>(() = > LibVx.vx_get_width(video));
 }
 
 static bool vx_video_is_rotated(vx_video video)
