@@ -657,37 +657,6 @@ int vx_get_adjusted_height(const vx_video* video)
 	return height;
 }
 
-//long long vx_get_file_position(const vx_video* video)
-//{
-//	return video->fmt_ctx->pb->pos;
-//}
-
-//long long vx_get_file_size(const vx_video* video)
-//{
-//	return avio_size(video->fmt_ctx->pb);
-//}
-
-//int vx_get_audio_sample_rate(const vx_video* me)
-//{
-//	if (!me->audio_codec_ctx)
-//		return 0;
-//
-//	return me->audio_codec_ctx->sample_rate;
-//}
-
-//int vx_get_audio_present(const vx_video* me)
-//{
-//	return me->audio_codec_ctx ? 1 : 0;
-//}
-
-//int vx_get_audio_channels(const vx_video* me)
-//{
-//	if (!me->audio_codec_ctx)
-//		return 0;
-//
-//	return me->audio_codec_ctx->channels;
-//}
-
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
 {
 	if (video->ts_offset == AV_NOPTS_VALUE && stream_type == video->video_stream)
@@ -1325,25 +1294,7 @@ cleanup:
 	return ret;
 }
 
-//vx_error vx_get_duration(const vx_video* video, float* out_duration)
-//{
-//	*out_duration = (float)video->fmt_ctx->duration / (float)AV_TIME_BASE;
-//	return VX_ERR_SUCCESS;
-//}
-
-
-
 bool vx_get_hw_context_present(const vx_video* video)
 {
 	return video->hw_device_ctx != NULL;
 }
-
-//vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
-//{
-//	AVRational par = video->video_codec_ctx->sample_aspect_ratio;
-//	if (par.num == 0 && par.den == 1)
-//		return VX_ERR_PIXEL_ASPECT;
-//
-//	*out_par = (float)av_q2d(par);
-//	return VX_ERR_SUCCESS;
-//}
