@@ -176,7 +176,7 @@ VX_DECLSPEC int VX_CDECL vx_get_adjusted_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_height(const vx_video* video);
 
 // Note that you need to re-open the file (create a new vx_video instance) after counting frames.
-VX_DECLSPEC vx_error VX_CDECL vx_get_properties(vx_video* me, struct vx_video_info* out_video_info);
+VX_DECLSPEC vx_error VX_CDECL vx_get_properties(const vx_video* me, struct vx_video_info* out_video_info);
 
 VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 

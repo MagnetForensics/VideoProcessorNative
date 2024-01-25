@@ -528,7 +528,7 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 	return VX_ERR_SUCCESS;
 }
 
-vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info)
+vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
 {
 	int num_frames = 0;
 	int64_t first = 0;
