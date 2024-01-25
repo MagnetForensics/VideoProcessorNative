@@ -18,6 +18,7 @@ typedef struct vx_scene_info vx_scene_info;
 typedef struct vx_frame vx_frame;
 typedef struct vx_frame_info vx_frame_info;
 typedef struct vx_rectangle vx_rectangle;
+typedef struct vx_video_info vx_video_info;
 
 typedef enum {
 	VX_LOG_NONE				= 0,
