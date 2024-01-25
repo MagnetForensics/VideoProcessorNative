@@ -497,9 +497,42 @@ static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int strea
 	return false;
 }
 
+vx_error vx_get_duration(const vx_video* video, float* out_duration)
+{
+	if (video->fmt_ctx->duration == AV_NOPTS_VALUE) {
+		// No valid timestamps were set for any stream
+		return 0;
+	}
+
+	int64_t video_stream_duration = video->fmt_ctx->streams[video->video_stream]->duration;
+	// Check if there is a big difference between video stream duration and combined duration
+	bool duration_discrepency = llabs(video->fmt_ctx->duration - video_stream_duration) > video_stream_duration * 2;
+
+	*out_duration = duration_discrepency
+		// Use only the video stream duration
+		? video->fmt_ctx->streams[video->video_stream]->duration * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base)
+		// Use the combined audio + video duration
+		: video->fmt_ctx->duration * av_q2d(AV_TIME_BASE_Q);
+
+	return VX_ERR_SUCCESS;
+}
+
+vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
+{
+	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
+
+	if (rate.num == 0 || rate.den == 0)
+		return VX_ERR_FRAME_RATE;
+
+	*out_fps = (float)av_q2d(rate);
+	return VX_ERR_SUCCESS;
+}
+
 vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info)
 {
 	int num_frames = 0;
+	int64_t first = 0;
+	int64_t last = 0;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
@@ -513,23 +546,40 @@ vx_error vx_get_properties(vx_video* video, struct vx_video_info* out_video_info
 
 		if (packet->stream_index == video->video_stream) {
 			num_frames++;
+			last = packet->dts;
+			
+			if (first == 0) {
+				first = packet->dts;
+			}
 		}
 
 		av_packet_unref(packet);
 	}
 
-	float frame_rate = 0 ;
-	vx_get_frame_rate(video, &frame_rate);
+	float duration = 0;
+	vx_get_duration(video, &duration);
+	if (duration <= 0) {
+		duration = (last - first) * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base);
+	}
 	out_video_info->width = vx_get_width(video);
 	out_video_info->height = vx_get_height(video);
 	out_video_info->adjusted_width = vx_get_adjusted_width(video);
 	out_video_info->adjusted_height = vx_get_adjusted_height(video);
-	out_video_info->frame_rate = frame_rate;
 	out_video_info->frame_count = num_frames;
-	out_video_info->duration = video->fmt_ctx->duration / AV_TIME_BASE;
+	out_video_info->duration = duration;
 	out_video_info->audio_present = video->audio_codec_ctx != NULL;
 	out_video_info->audio_sample_rate = video->audio_codec_ctx ? video->audio_codec_ctx->sample_rate : 0;
 	out_video_info->audio_channels = video->audio_codec_ctx ? video->audio_codec_ctx->channels : 0;
+
+	float frame_rate = 0;
+	if (vx_get_frame_rate(video, &frame_rate) == VX_ERR_FRAME_RATE) {
+		if (out_video_info->frame_count == 0 || out_video_info->duration == 0) { // float comparison
+			return VX_ERR_FRAME_RATE;
+		}
+
+		frame_rate = out_video_info->frame_count / out_video_info->duration;
+	}
+	out_video_info->frame_rate = frame_rate;
 
 	av_packet_unref(packet);
 	av_packet_free(&packet);
@@ -607,36 +657,36 @@ int vx_get_adjusted_height(const vx_video* video)
 	return height;
 }
 
-long long vx_get_file_position(const vx_video* video)
-{
-	return video->fmt_ctx->pb->pos;
-}
+//long long vx_get_file_position(const vx_video* video)
+//{
+//	return video->fmt_ctx->pb->pos;
+//}
 
-long long vx_get_file_size(const vx_video* video)
-{
-	return avio_size(video->fmt_ctx->pb);
-}
+//long long vx_get_file_size(const vx_video* video)
+//{
+//	return avio_size(video->fmt_ctx->pb);
+//}
 
-int vx_get_audio_sample_rate(const vx_video* me)
-{
-	if (!me->audio_codec_ctx)
-		return 0;
+//int vx_get_audio_sample_rate(const vx_video* me)
+//{
+//	if (!me->audio_codec_ctx)
+//		return 0;
+//
+//	return me->audio_codec_ctx->sample_rate;
+//}
 
-	return me->audio_codec_ctx->sample_rate;
-}
+//int vx_get_audio_present(const vx_video* me)
+//{
+//	return me->audio_codec_ctx ? 1 : 0;
+//}
 
-int vx_get_audio_present(const vx_video* me)
-{
-	return me->audio_codec_ctx ? 1 : 0;
-}
-
-int vx_get_audio_channels(const vx_video* me)
-{
-	if (!me->audio_codec_ctx)
-		return 0;
-
-	return me->audio_codec_ctx->channels;
-}
+//int vx_get_audio_channels(const vx_video* me)
+//{
+//	if (!me->audio_codec_ctx)
+//		return 0;
+//
+//	return me->audio_codec_ctx->channels;
+//}
 
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
 {
@@ -1275,34 +1325,25 @@ cleanup:
 	return ret;
 }
 
-vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
-{
-	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
+//vx_error vx_get_duration(const vx_video* video, float* out_duration)
+//{
+//	*out_duration = (float)video->fmt_ctx->duration / (float)AV_TIME_BASE;
+//	return VX_ERR_SUCCESS;
+//}
 
-	if (rate.num == 0 || rate.den == 0)
-		return VX_ERR_FRAME_RATE;
 
-	*out_fps = (float)av_q2d(rate);
-	return VX_ERR_SUCCESS;
-}
-
-vx_error vx_get_duration(const vx_video* video, float* out_duration)
-{
-	*out_duration = (float)video->fmt_ctx->duration / (float)AV_TIME_BASE;
-	return VX_ERR_SUCCESS;
-}
 
 bool vx_get_hw_context_present(const vx_video* video)
 {
 	return video->hw_device_ctx != NULL;
 }
 
-vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
-{
-	AVRational par = video->video_codec_ctx->sample_aspect_ratio;
-	if (par.num == 0 && par.den == 1)
-		return VX_ERR_PIXEL_ASPECT;
-
-	*out_par = (float)av_q2d(par);
-	return VX_ERR_SUCCESS;
-}
+//vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
+//{
+//	AVRational par = video->video_codec_ctx->sample_aspect_ratio;
+//	if (par.num == 0 && par.den == 1)
+//		return VX_ERR_PIXEL_ASPECT;
+//
+//	*out_par = (float)av_q2d(par);
+//	return VX_ERR_SUCCESS;
+//}

@@ -175,19 +175,9 @@ VX_DECLSPEC int VX_CDECL vx_get_height(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_height(const vx_video* video);
 
-VX_DECLSPEC int VX_CDECL vx_get_audio_present(const vx_video* video);
-VX_DECLSPEC int VX_CDECL vx_get_audio_sample_rate(const vx_video* video);
-VX_DECLSPEC int VX_CDECL vx_get_audio_channels(const vx_video* video);
-
-VX_DECLSPEC long long VX_CDECL vx_get_file_position(const vx_video* video);
-VX_DECLSPEC long long VX_CDECL vx_get_file_size(const vx_video* video);
-
 // Note that you need to re-open the file (create a new vx_video instance) after counting frames.
 VX_DECLSPEC vx_error VX_CDECL vx_get_properties(vx_video* me, struct vx_video_info* out_video_info);
 
-VX_DECLSPEC vx_error VX_CDECL vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par);
-VX_DECLSPEC vx_error VX_CDECL vx_get_frame_rate(const vx_video* video, float* out_fps);
-VX_DECLSPEC vx_error VX_CDECL vx_get_duration(const vx_video* video, float* out_duration);
 VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 
 VX_DECLSPEC vx_frame* VX_CDECL vx_frame_create(const vx_video* video, int width, int height, vx_pix_fmt pix_fmt);
