@@ -531,8 +531,8 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
 {
 	int num_frames = 0;
-	int64_t first = 0;
-	int64_t last = 0;
+	int64_t firstTimeStamp = 0;
+	int64_t lastTimeStamp = 0;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
@@ -546,10 +546,10 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 
 		if (packet->stream_index == video->video_stream) {
 			num_frames++;
-			last = packet->dts;
+			lastTimeStamp = packet->dts;
 			
-			if (first == 0) {
-				first = packet->dts;
+			if (firstTimeStamp == 0) {
+				firstTimeStamp = packet->dts;
 			}
 		}
 
@@ -559,7 +559,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	float duration = 0;
 	vx_get_duration(video, &duration);
 	if (duration <= 0) {
-		duration = (last - first) * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base);
+		duration = (lastTimeStamp - firstTimeStamp) * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base);
 	}
 	out_video_info->width = vx_get_width(video);
 	out_video_info->height = vx_get_height(video);
@@ -573,7 +573,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 
 	float frame_rate = 0;
 	if (vx_get_frame_rate(video, &frame_rate) == VX_ERR_FRAME_RATE) {
-		if (out_video_info->frame_count == 0 || out_video_info->duration == 0) { // float comparison
+		if (out_video_info->frame_count == 0 || out_video_info->duration <= 0) {
 			return VX_ERR_FRAME_RATE;
 		}
 
