@@ -497,26 +497,6 @@ static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int strea
 	return false;
 }
 
-vx_error vx_get_duration(const vx_video* video, float* out_duration)
-{
-	if (video->fmt_ctx->duration == AV_NOPTS_VALUE) {
-		// No valid timestamps were set for any stream
-		return 0;
-	}
-
-	int64_t video_stream_duration = video->fmt_ctx->streams[video->video_stream]->duration;
-	// Check if there is a big difference between video stream duration and combined duration
-	bool duration_discrepency = llabs(video->fmt_ctx->duration - video_stream_duration) > video_stream_duration * 2;
-
-	*out_duration = duration_discrepency
-		// Use only the video stream duration
-		? video->fmt_ctx->streams[video->video_stream]->duration * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base)
-		// Use the combined audio + video duration
-		: video->fmt_ctx->duration * av_q2d(AV_TIME_BASE_Q);
-
-	return VX_ERR_SUCCESS;
-}
-
 vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 {
 	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
@@ -530,9 +510,9 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 
 vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
 {
-	int num_frames = 0;
-	int64_t first_timestamp = 0;
-	int64_t last_timestamp = 0;
+	int frame_count = 0;
+	int64_t first_timestamp = AV_NOPTS_VALUE;
+	int64_t last_timestamp = AV_NOPTS_VALUE;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
@@ -545,44 +525,54 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 		}
 
 		if (packet->stream_index == video->video_stream) {
-			num_frames++;
-			last_timestamp = packet->dts;
+			frame_count++;
+			last_timestamp = packet->pts;
 			
-			if (first_timestamp == 0) {
-				first_timestamp = packet->dts;
+			if (first_timestamp == AV_NOPTS_VALUE) {
+				first_timestamp = last_timestamp;
 			}
 		}
 
 		av_packet_unref(packet);
 	}
 
-	float duration = 0;
-	vx_get_duration(video, &duration);
-	if (duration <= 0) {
-		duration = (last_timestamp - first_timestamp) * av_q2d(video->fmt_ctx->streams[video->video_stream]->time_base);
+	av_packet_unref(packet);
+	av_packet_free(&packet);
+
+	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
+	AVRational frame_rate = video_stream->avg_frame_rate;
+	int64_t duration = (last_timestamp - first_timestamp) > 0
+		? last_timestamp - first_timestamp
+		: video_stream->duration;
+
+	if (frame_rate.num == 0 || frame_rate.den == 0) {
+		if (duration == AV_NOPTS_VALUE || duration == 0) {
+			// No frame rate or duration information available so neither be estimated
+			return VX_ERR_FRAME_RATE;
+		}
+
+		av_reduce(
+			&frame_rate.num,
+			&frame_rate.den,
+			frame_count * (int64_t)video_stream->time_base.den,
+			duration * (int64_t)video_stream->time_base.num,
+			INT_MAX);
 	}
+
+	double duration_seconds = first_timestamp != AV_NOPTS_VALUE && last_timestamp != AV_NOPTS_VALUE
+		? duration * av_q2d(video_stream->time_base)
+		: frame_count / av_q2d(frame_rate);
+
 	out_video_info->width = vx_get_width(video);
 	out_video_info->height = vx_get_height(video);
 	out_video_info->adjusted_width = vx_get_adjusted_width(video);
 	out_video_info->adjusted_height = vx_get_adjusted_height(video);
-	out_video_info->frame_count = num_frames;
-	out_video_info->duration = duration;
-	out_video_info->audio_present = video->audio_codec_ctx != NULL;
+	out_video_info->frame_count = frame_count;
+	out_video_info->frame_rate = (float)av_q2d(frame_rate);
+	out_video_info->duration = (float)duration_seconds;
+	out_video_info->has_audio = video->audio_codec_ctx != NULL;
 	out_video_info->audio_sample_rate = video->audio_codec_ctx ? video->audio_codec_ctx->sample_rate : 0;
-	out_video_info->audio_channels = video->audio_codec_ctx ? video->audio_codec_ctx->channels : 0;
-
-	float frame_rate = 0;
-	if (vx_get_frame_rate(video, &frame_rate) == VX_ERR_FRAME_RATE) {
-		if (out_video_info->frame_count == 0 || out_video_info->duration <= 0) {
-			return VX_ERR_FRAME_RATE;
-		}
-
-		frame_rate = out_video_info->frame_count / out_video_info->duration;
-	}
-	out_video_info->frame_rate = frame_rate;
-
-	av_packet_unref(packet);
-	av_packet_free(&packet);
+	out_video_info->audio_channels = video->audio_codec_ctx ? video->audio_codec_ctx->ch_layout.nb_channels : 0;
 
 	return VX_ERR_SUCCESS;
 }

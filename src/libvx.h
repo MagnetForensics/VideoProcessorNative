@@ -159,7 +159,7 @@ struct vx_video_info
 	float frame_rate;
 	int frame_count;
 	float duration;
-	bool audio_present;
+	bool has_audio;
 	int audio_sample_rate;
 	int audio_channels;
 };
