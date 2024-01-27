@@ -519,14 +519,14 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 		return VX_ERR_ALLOCATE;
 	}
 
-	while (true) {
-		if (!vx_read_packet(video->fmt_ctx, packet, video->video_stream)) {
-			break;
-		}
-
+	// Iterate through all the data packets (frames) in the video to
+	// get a good idea of what can actually be read from the file
+	while (vx_read_packet(video->fmt_ctx, packet, video->video_stream)) {
 		if (packet->stream_index == video->video_stream) {
+			// Use decoded timestamp since presentation timestamp is not
+			// always available, and may be out of order
+			last_timestamp = packet->dts;
 			frame_count++;
-			last_timestamp = packet->pts;
 			
 			if (first_timestamp == AV_NOPTS_VALUE) {
 				first_timestamp = last_timestamp;
@@ -545,9 +545,10 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 		? last_timestamp - first_timestamp
 		: video_stream->duration;
 
+	// Do the best we can to estimate the frame rate and duration if required
 	if (frame_rate.num == 0 || frame_rate.den == 0) {
 		if (duration == AV_NOPTS_VALUE || duration == 0) {
-			// No frame rate or duration information available so neither be estimated
+			// No frame rate or duration information available so neither can be estimated
 			return VX_ERR_FRAME_RATE;
 		}
 
@@ -556,7 +557,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 			&frame_rate.den,
 			frame_count * (int64_t)video_stream->time_base.den,
 			duration * (int64_t)video_stream->time_base.num,
-			INT_MAX);
+			60000);
 	}
 
 	double duration_seconds = first_timestamp != AV_NOPTS_VALUE && last_timestamp != AV_NOPTS_VALUE
