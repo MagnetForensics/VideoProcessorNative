@@ -350,7 +350,7 @@ cleanup:
 	return err;
 }
 
-vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options)
+vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options, vx_video_info* out_video_info)
 {
 	if (!initialized) {
 		// Log messages with this level, or lower, will be send to stderror
@@ -425,6 +425,11 @@ vx_error vx_open(vx_video** video, const char* filename, const vx_video_options 
 		if ((error = vx_initialize_filtergraph(me, AVMEDIA_TYPE_AUDIO, &params)) != VX_ERR_SUCCESS)
 			goto cleanup;
 	}
+
+	vx_get_properties(me, out_video_info);
+
+	avio_seek(me->fmt_ctx->pb, 0, SEEK_SET);
+	avformat_seek_file(me->fmt_ctx, me->video_stream, AV_NOPTS_VALUE, AV_NOPTS_VALUE, INT64_MAX, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
 
 	*video = me;
 	return VX_ERR_SUCCESS;

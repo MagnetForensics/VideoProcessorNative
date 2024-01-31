@@ -168,7 +168,7 @@ typedef void (*vx_log_callback)(const char* message, int level);
 
 VX_DECLSPEC void VX_CDECL vx_log_set_cb(vx_log_callback cb);
 
-VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, const vx_video_options options);
+VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, const vx_video_options options, vx_video_info* out_video_info);
 VX_DECLSPEC void VX_CDECL vx_close(vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_width(const vx_video* video);
