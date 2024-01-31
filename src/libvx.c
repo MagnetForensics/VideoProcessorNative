@@ -518,6 +518,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	int frame_count = 0;
 	int64_t first_timestamp = AV_NOPTS_VALUE;
 	int64_t last_timestamp = AV_NOPTS_VALUE;
+	int excluded_packet_flags = AV_PKT_FLAG_CORRUPT | AV_PKT_FLAG_DISCARD | AV_PKT_FLAG_DISPOSABLE;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
@@ -527,7 +528,9 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	// Iterate through all the data packets (frames) in the video to
 	// get a good idea of what can actually be read from the file
 	while (vx_read_packet(video->fmt_ctx, packet, video->video_stream)) {
-		if (packet->stream_index == video->video_stream) {
+		// Ignore packets that are not from the selected stream
+		// or are marked as corrupt or discarded
+		if (packet->stream_index == video->video_stream && !(packet->flags & excluded_packet_flags)) {
 			// Use decoded timestamp since presentation timestamp is not
 			// always available, and may be out of order
 			last_timestamp = packet->dts;
