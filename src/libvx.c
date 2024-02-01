@@ -434,28 +434,28 @@ cleanup:
 	return error;
 }
 
-vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options, vx_video_info* out_video_info) 
+vx_error vx_open(const char* filename, const vx_video_options options, vx_video** out_video, vx_video_info* out_video_info)
 {
-	vx_video* me = NULL;
+	vx_video* video = NULL;
 	vx_error error = VX_ERR_UNKNOWN;
 
-	if ((error = vx_open_internal(&me, filename, options)) != VX_ERR_SUCCESS)
+	if ((error = vx_open_internal(&video, filename, options)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
-	if ((error = vx_get_properties(me, out_video_info)) != VX_ERR_SUCCESS)
+	if ((error = vx_get_properties(video, out_video_info)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
-	vx_close(me);
+	vx_close(video);
 
-	if ((error = vx_open_internal(&me, filename, options)) != VX_ERR_SUCCESS)
+	if ((error = vx_open_internal(&video, filename, options)) != VX_ERR_SUCCESS)
 		goto cleanup;
 
-	*video = me;
+	*out_video = video;
 
 	return VX_ERR_SUCCESS;
 
 cleanup:
-	vx_close(me);
+	vx_close(video);
 	return error;
 }
 
@@ -547,7 +547,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 
 	// Iterate through all the data packets (frames) in the video to
 	// get a good idea of what can actually be read from the file
-	while (vx_read_packet(video->fmt_ctx, packet, video->video_stream)) {
+	while (av_read_frame(video->fmt_ctx, packet) == 0) {
 		// Ignore packets that are not from the selected stream
 		// or are marked as corrupt or discarded
 		if (packet->stream_index == video->video_stream && !(packet->flags & excluded_packet_flags)) {

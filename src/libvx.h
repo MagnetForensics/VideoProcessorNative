@@ -168,17 +168,13 @@ typedef void (*vx_log_callback)(const char* message, int level);
 
 VX_DECLSPEC void VX_CDECL vx_log_set_cb(vx_log_callback cb);
 
-VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, const vx_video_options options, vx_video_info* out_video_info);
+VX_DECLSPEC vx_error VX_CDECL vx_open(const char* filename, const vx_video_options options, vx_video** out_video, vx_video_info* out_video_info);
 VX_DECLSPEC void VX_CDECL vx_close(vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_height(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_height(const vx_video* video);
-
-// Note that you need to re-open the file (create a new vx_video instance) after counting frames.
-VX_DECLSPEC vx_error VX_CDECL vx_get_properties(const vx_video* me, struct vx_video_info* out_video_info);
-
 VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 
 VX_DECLSPEC vx_frame* VX_CDECL vx_frame_create(const vx_video* video, int width, int height, vx_pix_fmt pix_fmt);
