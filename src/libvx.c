@@ -567,19 +567,14 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	av_packet_unref(packet);
 	av_packet_free(&packet);
 
+	// Do the best we can to estimate the frame rate and duration, if required
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
 	AVRational frame_rate = video_stream->avg_frame_rate;
-	int64_t duration = (last_timestamp - first_timestamp) > 0
+	int64_t duration = (last_timestamp - first_timestamp) > 0 || video_stream->duration == AV_NOPTS_VALUE
 		? last_timestamp - first_timestamp
 		: video_stream->duration;
 
-	// Do the best we can to estimate the frame rate and duration if required
 	if (frame_rate.num == 0 || frame_rate.den == 0) {
-		if (duration == AV_NOPTS_VALUE || duration == 0) {
-			// No frame rate or duration information available so neither can be estimated
-			return VX_ERR_FRAME_RATE;
-		}
-
 		av_reduce(
 			&frame_rate.num,
 			&frame_rate.den,
@@ -588,7 +583,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 			60000);
 	}
 
-	double duration_seconds = first_timestamp != AV_NOPTS_VALUE && last_timestamp != AV_NOPTS_VALUE
+	double duration_seconds = duration > 0
 		? duration * av_q2d(video_stream->time_base)
 		: frame_count / av_q2d(frame_rate);
 
