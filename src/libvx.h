@@ -18,6 +18,7 @@ typedef struct vx_scene_info vx_scene_info;
 typedef struct vx_frame vx_frame;
 typedef struct vx_frame_info vx_frame_info;
 typedef struct vx_rectangle vx_rectangle;
+typedef struct vx_video_info vx_video_info;
 
 typedef enum {
 	VX_LOG_NONE				= 0,
@@ -149,31 +150,31 @@ struct vx_video
 	int64_t ts_offset;
 };
 
+struct vx_video_info
+{
+	int width;
+	int height;
+	int adjusted_width;
+	int adjusted_height;
+	float frame_rate;
+	int frame_count;
+	float duration;
+	bool has_audio;
+	int audio_sample_rate;
+	int audio_channels;
+};
+
 typedef void (*vx_log_callback)(const char* message, int level);
 
 VX_DECLSPEC void VX_CDECL vx_log_set_cb(vx_log_callback cb);
 
-VX_DECLSPEC vx_error VX_CDECL vx_open(vx_video** video, const char* filename, const vx_video_options options);
+VX_DECLSPEC vx_error VX_CDECL vx_open(const char* filename, const vx_video_options options, vx_video** out_video, vx_video_info* out_video_info);
 VX_DECLSPEC void VX_CDECL vx_close(vx_video* video);
 
 VX_DECLSPEC int VX_CDECL vx_get_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_height(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_width(const vx_video* video);
 VX_DECLSPEC int VX_CDECL vx_get_adjusted_height(const vx_video* video);
-
-VX_DECLSPEC int VX_CDECL vx_get_audio_present(const vx_video* video);
-VX_DECLSPEC int VX_CDECL vx_get_audio_sample_rate(const vx_video* video);
-VX_DECLSPEC int VX_CDECL vx_get_audio_channels(const vx_video* video);
-
-VX_DECLSPEC long long VX_CDECL vx_get_file_position(const vx_video* video);
-VX_DECLSPEC long long VX_CDECL vx_get_file_size(const vx_video* video);
-
-// Note that you need to re-open the file (create a new vx_video instance) after counting frames.
-VX_DECLSPEC vx_error VX_CDECL vx_count_frames(vx_video* me, int* out_num_frames);
-
-VX_DECLSPEC vx_error VX_CDECL vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par);
-VX_DECLSPEC vx_error VX_CDECL vx_get_frame_rate(const vx_video* video, float* out_fps);
-VX_DECLSPEC vx_error VX_CDECL vx_get_duration(const vx_video* video, float* out_duration);
 VX_DECLSPEC bool VX_CDECL vx_get_hw_context_present(const vx_video* video);
 
 VX_DECLSPEC vx_frame* VX_CDECL vx_frame_create(const vx_video* video, int width, int height, vx_pix_fmt pix_fmt);

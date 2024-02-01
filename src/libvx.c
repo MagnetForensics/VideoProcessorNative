@@ -350,7 +350,7 @@ cleanup:
 	return err;
 }
 
-vx_error vx_open(vx_video** video, const char* filename, const vx_video_options options)
+static vx_error vx_open_internal(vx_video** video, const char* filename, const vx_video_options options)
 {
 	if (!initialized) {
 		// Log messages with this level, or lower, will be send to stderror
@@ -434,6 +434,31 @@ cleanup:
 	return error;
 }
 
+vx_error vx_open(const char* filename, const vx_video_options options, vx_video** out_video, vx_video_info* out_video_info)
+{
+	vx_video* video = NULL;
+	vx_error error = VX_ERR_UNKNOWN;
+
+	if ((error = vx_open_internal(&video, filename, options)) != VX_ERR_SUCCESS)
+		goto cleanup;
+
+	if ((error = vx_get_properties(video, out_video_info)) != VX_ERR_SUCCESS)
+		goto cleanup;
+
+	vx_close(video);
+
+	if ((error = vx_open_internal(&video, filename, options)) != VX_ERR_SUCCESS)
+		goto cleanup;
+
+	*out_video = video;
+
+	return VX_ERR_SUCCESS;
+
+cleanup:
+	vx_close(video);
+	return error;
+}
+
 void vx_close(vx_video* video)
 {
 	if (!video) {
@@ -497,22 +522,43 @@ static bool vx_read_packet(AVFormatContext* fmt_ctx, AVPacket* packet, int strea
 	return false;
 }
 
-vx_error vx_count_frames(vx_video* me, int* out_num_frames)
+vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 {
-	int num_frames = 0;
+	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
+
+	if (rate.num == 0 || rate.den == 0)
+		return VX_ERR_FRAME_RATE;
+
+	*out_fps = (float)av_q2d(rate);
+	return VX_ERR_SUCCESS;
+}
+
+vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
+{
+	int frame_count = 0;
+	int64_t first_timestamp = AV_NOPTS_VALUE;
+	int64_t last_timestamp = AV_NOPTS_VALUE;
+	int excluded_packet_flags = AV_PKT_FLAG_CORRUPT | AV_PKT_FLAG_DISCARD | AV_PKT_FLAG_DISPOSABLE;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
 		return VX_ERR_ALLOCATE;
 	}
 
-	while (true) {
-		if (!vx_read_packet(me->fmt_ctx, packet, me->video_stream)) {
-			break;
-		}
-
-		if (packet->stream_index == me->video_stream) {
-			num_frames++;
+	// Iterate through all the data packets (frames) in the video to
+	// get a good idea of what can actually be read from the file
+	while (av_read_frame(video->fmt_ctx, packet) == 0) {
+		// Ignore packets that are not from the selected stream
+		// or are marked as corrupt or discarded
+		if (packet->stream_index == video->video_stream && !(packet->flags & excluded_packet_flags)) {
+			// Use decoded timestamp since presentation timestamp is not
+			// always available, and may be out of order
+			last_timestamp = packet->dts;
+			frame_count++;
+			
+			if (first_timestamp == AV_NOPTS_VALUE) {
+				first_timestamp = last_timestamp;
+			}
 		}
 
 		av_packet_unref(packet);
@@ -521,7 +567,41 @@ vx_error vx_count_frames(vx_video* me, int* out_num_frames)
 	av_packet_unref(packet);
 	av_packet_free(&packet);
 
-	*out_num_frames = num_frames;
+	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
+	AVRational frame_rate = video_stream->avg_frame_rate;
+	int64_t duration = (last_timestamp - first_timestamp) > 0
+		? last_timestamp - first_timestamp
+		: video_stream->duration;
+
+	// Do the best we can to estimate the frame rate and duration if required
+	if (frame_rate.num == 0 || frame_rate.den == 0) {
+		if (duration == AV_NOPTS_VALUE || duration == 0) {
+			// No frame rate or duration information available so neither can be estimated
+			return VX_ERR_FRAME_RATE;
+		}
+
+		av_reduce(
+			&frame_rate.num,
+			&frame_rate.den,
+			frame_count * (int64_t)video_stream->time_base.den,
+			duration * (int64_t)video_stream->time_base.num,
+			60000);
+	}
+
+	double duration_seconds = first_timestamp != AV_NOPTS_VALUE && last_timestamp != AV_NOPTS_VALUE
+		? duration * av_q2d(video_stream->time_base)
+		: frame_count / av_q2d(frame_rate);
+
+	out_video_info->width = vx_get_width(video);
+	out_video_info->height = vx_get_height(video);
+	out_video_info->adjusted_width = vx_get_adjusted_width(video);
+	out_video_info->adjusted_height = vx_get_adjusted_height(video);
+	out_video_info->frame_count = frame_count;
+	out_video_info->frame_rate = (float)av_q2d(frame_rate);
+	out_video_info->duration = (float)duration_seconds;
+	out_video_info->has_audio = video->audio_codec_ctx != NULL;
+	out_video_info->audio_sample_rate = video->audio_codec_ctx ? video->audio_codec_ctx->sample_rate : 0;
+	out_video_info->audio_channels = video->audio_codec_ctx ? video->audio_codec_ctx->ch_layout.nb_channels : 0;
 
 	return VX_ERR_SUCCESS;
 }
@@ -594,37 +674,6 @@ int vx_get_adjusted_height(const vx_video* video)
 	vx_get_adjusted_frame_dimensions(video, &width, &height);
 
 	return height;
-}
-
-long long vx_get_file_position(const vx_video* video)
-{
-	return video->fmt_ctx->pb->pos;
-}
-
-long long vx_get_file_size(const vx_video* video)
-{
-	return avio_size(video->fmt_ctx->pb);
-}
-
-int vx_get_audio_sample_rate(const vx_video* me)
-{
-	if (!me->audio_codec_ctx)
-		return 0;
-
-	return me->audio_codec_ctx->sample_rate;
-}
-
-int vx_get_audio_present(const vx_video* me)
-{
-	return me->audio_codec_ctx ? 1 : 0;
-}
-
-int vx_get_audio_channels(const vx_video* me)
-{
-	if (!me->audio_codec_ctx)
-		return 0;
-
-	return me->audio_codec_ctx->channels;
 }
 
 double vx_estimate_timestamp(vx_video* video, const int stream_type, const int64_t pts)
@@ -1264,34 +1313,7 @@ cleanup:
 	return ret;
 }
 
-vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
-{
-	AVRational rate = video->fmt_ctx->streams[video->video_stream]->avg_frame_rate;
-
-	if (rate.num == 0 || rate.den == 0)
-		return VX_ERR_FRAME_RATE;
-
-	*out_fps = (float)av_q2d(rate);
-	return VX_ERR_SUCCESS;
-}
-
-vx_error vx_get_duration(const vx_video* video, float* out_duration)
-{
-	*out_duration = (float)video->fmt_ctx->duration / (float)AV_TIME_BASE;
-	return VX_ERR_SUCCESS;
-}
-
 bool vx_get_hw_context_present(const vx_video* video)
 {
 	return video->hw_device_ctx != NULL;
-}
-
-vx_error vx_get_pixel_aspect_ratio(const vx_video* video, float* out_par)
-{
-	AVRational par = video->video_codec_ctx->sample_aspect_ratio;
-	if (par.num == 0 && par.den == 1)
-		return VX_ERR_PIXEL_ASPECT;
-
-	*out_par = (float)av_q2d(par);
-	return VX_ERR_SUCCESS;
 }
