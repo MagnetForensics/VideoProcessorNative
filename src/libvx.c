@@ -533,6 +533,11 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 	return VX_ERR_SUCCESS;
 }
 
+/// <summary>
+/// Retrieve basic video properties.
+/// This will advance the demuxer to the end of the file, so it will need
+/// resetting if the video is to be read again.
+/// </summary>
 vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
 {
 	int frame_count = 0;
@@ -553,12 +558,13 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 		if (packet->stream_index == video->video_stream && !(packet->flags & excluded_packet_flags)) {
 			// Use decoded timestamp since presentation timestamp is not
 			// always available, and may be out of order
-			last_timestamp = packet->dts;
-			frame_count++;
+			if (packet->dts > last_timestamp)
+				last_timestamp = packet->dts;
 			
-			if (first_timestamp == AV_NOPTS_VALUE) {
+			if (first_timestamp == AV_NOPTS_VALUE)
 				first_timestamp = last_timestamp;
-			}
+
+			frame_count++;
 		}
 
 		av_packet_unref(packet);
@@ -570,7 +576,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	// Do the best we can to estimate the frame rate and duration, if required
 	const AVStream* video_stream = video->fmt_ctx->streams[video->video_stream];
 	AVRational frame_rate = video_stream->avg_frame_rate;
-	int64_t duration = (last_timestamp - first_timestamp) > 0 || video_stream->duration == AV_NOPTS_VALUE
+	int64_t duration = llabs(last_timestamp - first_timestamp) > 0 || video_stream->duration == AV_NOPTS_VALUE
 		? last_timestamp - first_timestamp
 		: video_stream->duration;
 
