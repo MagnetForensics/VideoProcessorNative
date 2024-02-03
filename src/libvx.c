@@ -26,9 +26,9 @@
 
 #define FRAME_BUFFER_PADDING 4096
 #define LOG_TRACE_BUFSIZE 4096
+#define TICKS_PER_SECOND (AV_TIME_BASE * 10L)
 
 static bool initialized = false;
-static int retry_count = 100;
 static vx_log_callback log_cb = NULL;
 
 struct vx_audio_info
@@ -65,7 +65,6 @@ struct vx_frame_info
 	int width;
 	int height;
 	double timestamp;
-	double timestamp_original;
 	vx_frame_flag flags;
 };
 
@@ -123,7 +122,12 @@ static void vx_log_cb(const void* avcl, int level, const char* fmt, void* vl)
 
 static double vx_timestamp_to_seconds(const vx_video* video, const int stream_type, const long long ts)
 {
-	return (double)ts * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
+	// Ensure the timestamp won't overflow
+	int64_t rescaled_timestamp = av_rescale_rnd(ts, TICKS_PER_SECOND, 1, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX) > INT64_MIN
+		? ts
+		: 0;
+
+	return (double)rescaled_timestamp * av_q2d(video->fmt_ctx->streams[stream_type]->time_base);
 }
 
 static int vx_enqueue_qsort(const void* a, const void* b)
@@ -540,10 +544,10 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 /// </summary>
 vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_video_info)
 {
-	int frame_count = 0;
+	const int EXCLUDED_PACKET_FLAGS = AV_PKT_FLAG_CORRUPT | AV_PKT_FLAG_DISCARD | AV_PKT_FLAG_DISPOSABLE;
 	int64_t first_timestamp = AV_NOPTS_VALUE;
 	int64_t last_timestamp = AV_NOPTS_VALUE;
-	int excluded_packet_flags = AV_PKT_FLAG_CORRUPT | AV_PKT_FLAG_DISCARD | AV_PKT_FLAG_DISPOSABLE;
+	int frame_count = 0;
 
 	AVPacket* packet = av_packet_alloc();
 	if (!packet) {
@@ -555,10 +559,13 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	while (av_read_frame(video->fmt_ctx, packet) == 0) {
 		// Ignore packets that are not from the selected stream
 		// or are marked as corrupt or discarded
-		if (packet->stream_index == video->video_stream && !(packet->flags & excluded_packet_flags)) {
+		if (packet->stream_index == video->video_stream && !(packet->flags & EXCLUDED_PACKET_FLAGS)) {
+			// Ensure the timestamp won't overflow
+			int64_t rescaled_timestamp = av_rescale_rnd(packet->dts, TICKS_PER_SECOND, 1, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+
 			// Use decoded timestamp since presentation timestamp is not
 			// always available, and may be out of order
-			if (packet->dts > last_timestamp)
+			if (rescaled_timestamp > last_timestamp)
 				last_timestamp = packet->dts;
 			
 			if (first_timestamp == AV_NOPTS_VALUE)
@@ -590,7 +597,7 @@ vx_error vx_get_properties(const vx_video* video, struct vx_video_info* out_vide
 	}
 
 	double duration_seconds = duration > 0
-		? duration * av_q2d(video_stream->time_base)
+		? (double)duration * av_q2d(video_stream->time_base)
 		: frame_count / av_q2d(frame_rate);
 
 	out_video_info->width = vx_get_width(video);
@@ -1164,7 +1171,6 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 		vx_get_adjusted_frame_dimensions(me, &frame_info->width, &frame_info->height);
 		// TODO: Handle duplicate audio timestamps
 		frame_info->timestamp = vx_estimate_timestamp(me, stream_type, frame->best_effort_timestamp);
-		frame_info->timestamp_original = ts;
 		frame_info->flags = vx_frame_has_image(frame) ? VX_FF_HAS_IMAGE : 0;
 		frame_info->flags |= frame->nb_samples > 0 ? VX_FF_HAS_AUDIO : 0;
 		frame_info->flags |= frame->pict_type == AV_PICTURE_TYPE_I ? VX_FF_KEYFRAME : 0;
@@ -1183,6 +1189,7 @@ vx_error vx_frame_step_internal(vx_video* me, vx_frame_info* frame_info)
 vx_error vx_frame_step(vx_video* me, vx_frame_info* out_frame_info)
 {
 	vx_error first_error = VX_ERR_SUCCESS;
+	const int retry_count = 100;
 
 	for (int i = 0; i < retry_count; i++)
 	{
