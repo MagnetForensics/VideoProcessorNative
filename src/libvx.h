@@ -8,7 +8,7 @@ extern "C" {
 #ifdef _MSC_VER
 	//  Microsoft
 #define VX_DECLSPEC __declspec(dllexport);
-#define VX_CDECL __cdecl
+#define VX_CDECL __attribute__((cdecl))
 #else
 	//  GCC
 #define VX_DECLSPEC __attribute__((visibility("default")));

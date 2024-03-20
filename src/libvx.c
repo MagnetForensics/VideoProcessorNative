@@ -115,7 +115,7 @@ static void vx_log_cb(const void* avcl, int level, const char* fmt, void* vl)
 
 	const char message[LOG_TRACE_BUFSIZE] = { NULL };
 
-	if (vsprintf_s(&message, LOG_TRACE_BUFSIZE, fmt, vl) > 0) {
+	if (vsnprintfssage, LOG_TRACE_BUFSIZE, fmt, vl) > 0) {
 		log_cb(message, av_to_vx_log_level(level));
 	}
 }
@@ -969,7 +969,7 @@ static double vx_frame_metadata_as_double(const AVFrame* av_frame, const char* k
 	const AVDictionaryEntry* entry = av_dict_get(av_frame->metadata, key, NULL, AV_DICT_MATCH_CASE);
 
 	if (entry) {
-		sscanf_s(entry->value, "%lf", &value);
+		sscanf(entry->value, "%lf", &value);
 	}
 
 	return value == INFINITY || value == -INFINITY
