@@ -115,7 +115,7 @@ static void vx_log_cb(const void* avcl, int level, const char* fmt, void* vl)
 
 	const char message[LOG_TRACE_BUFSIZE] = { NULL };
 
-	if (vsnprintfssage, LOG_TRACE_BUFSIZE, fmt, vl) > 0) {
+	if (vsprintf_s(&message, LOG_TRACE_BUFSIZE, fmt, vl) > 0) {
 		log_cb(message, av_to_vx_log_level(level));
 	}
 }
