@@ -1,5 +1,8 @@
 ﻿cmake_minimum_required (VERSION 3.9)
 
+set(FFMPEG_NUGET_NAME "ffmpeg-lgpl")
+set(FFMPEG_NUGET_VERSION "6.1.0.2")
+
 # Enable Hot Reload for MSVC compilers if supported.
 if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
@@ -36,14 +39,15 @@ if(WIN32)
         PROPERTY CMAKE_VS_NUGET_PACKAGE_RESTORE "ON"
     )
     set_property(TARGET ${PROJECT_NAME}
-        PROPERTY VS_PACKAGE_REFERENCES "ffmpeg-lgpl_6.1.0.2"
+        PROPERTY VS_PACKAGE_REFERENCES "${FFMPEG_NUGET_NAME}_${FFMPEG_NUGET_VERSION}"
     )
 else()
     target_include_directories(${PROJECT_NAME} PUBLIC
-          "/mnt/c/Repos/ffmpeg-lgpl/build/native/Unix/include/x64"
+          "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}.${FFMPEG_NUGET_VERSION}/build/native/Unix/include/x64"
     )
 
-    set(FFMPEG_LIB_PATH "/mnt/c/Repos/ffmpeg-lgpl/build/native/Unix/lib/debug/x64")
+    # Assumes FFMpeg NuGet package have been explicitly/externally restored to ${CMAKE_CURRENT_SOURCE_DIR}/Packages
+    set(FFMPEG_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}.${FFMPEG_NUGET_VERSION}/build/native/Unix/lib/debug/x64")
     include(CMakePrintHelpers)
     cmake_print_variables(FFMPEG_LIB_PATH)
 

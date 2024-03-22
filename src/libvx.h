@@ -7,12 +7,12 @@ extern "C" {
 
 #ifdef _MSC_VER
 	//  Microsoft
-#define VX_DECLSPEC __declspec(dllexport);
-#define VX_CDECL __attribute__((cdecl))
+#define VX_DECLSPEC __declspec(dllexport)
+#define VX_CDECL __cdecl
 #else
 	//  GCC
-#define VX_DECLSPEC __attribute__((visibility("default")));
-#define VX_CDECL
+#define VX_DECLSPEC __attribute__((visibility("default")))
+#define VX_CDECL __attribute__((cdecl))
 #endif
 
 #define FRAME_QUEUE_SIZE 32
