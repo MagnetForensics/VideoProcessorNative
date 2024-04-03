@@ -3,23 +3,30 @@ Video frame extraction library using ffmpeg
 
 ## Requirements
 
-Requires, at minimum, an LGPL static build of ffmpeg v5.1.x. This is not provided here, though it is referenced by default in [packages.config](packages.config). There are many options for compiling ffmpeg, though the simplest is probably [using vcpkg](https://trac.ffmpeg.org/wiki/CompilationGuide/vcpkg).
+Requires, at minimum, an LGPL static build of ffmpeg v5.1.x. This is not provided here, though it is referenced by default in [Griffeye.VideoProcessor.Native.csproj](Griffeye.VideoProcessor.Native.csproj). There are many options for compiling ffmpeg, though the simplest is probably [using vcpkg](https://trac.ffmpeg.org/wiki/CompilationGuide/vcpkg).
 
 ## Build
 
+Update [CMakeLists.txt](CMakeLists.txt) and change the variables FFMPEG_NUGET_NAME and FFMPEG_NUGET_VERSION to the FFMpeg LGPL package to use.
+Also update [Griffeye.VideoProcessor.Native.csproj](Griffeye.VideoProcessor.Native.csproj) and set the FFMPeg LGPL package to use.
+
+### Windows
+Need to have Cmake installed and on the path.
 ```
-msbuild VideoProcessorNative.sln -restore -target:"Clean;Rebuild" -property:"Platform=x64;Configuration=Release"
+dotnet restore Griffeye.VideoProcessor.Native.csproj
+cmake -S . -B build_windows/
+cmake --build build_windows/ --config [Release|Debug]
+```
 
+### Linux
+Need to have dotnet CLI installed and some build utils
+`RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y build-essential cmake zip`
 
-sudo apt install -y openssh-server build-essential gdb rsync make zip
-wget https://github.com/microsoft/CMake/releases/download/v3.19.4268486/cmake-3.19.4268486-MSVC_2-Linux-x64.sh
-chmod +x cmake-3.19.4268486-MSVC_2-Linux-x64.sh
-sudo ./cmake-3.19.4268486-MSVC_2-Linux-x64.sh --skip-license --prefix=/usr
+```
+dotnet restore Griffeye.VideoProcessor.Native.csproj --packages Packages
+cmake -S . -B build_linux/
+cmake --build build_linux/ --config [Release|Debug]
 
-
-cmake . -B build_linux/
-nuget restore packages.config -SolutionDirectory build_linux/ -ConfigFile ~/.nuget/NuGet/NuGet.Config
-cmake --build build_linux/
 ```
 
 ## Architecture
