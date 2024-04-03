@@ -12,7 +12,7 @@ extern "C" {
 #else
 	//  GCC
 #define VX_DECLSPEC __attribute__((visibility("default")))
-#define VX_CDECL __attribute__((cdecl))
+#define VX_CDECL 
 #endif
 
 #define FRAME_QUEUE_SIZE 32
