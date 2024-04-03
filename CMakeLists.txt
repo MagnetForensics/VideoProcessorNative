@@ -43,11 +43,11 @@ if(WIN32)
     )
 else()
     target_include_directories(${PROJECT_NAME} PUBLIC
-          "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}.${FFMPEG_NUGET_VERSION}/build/native/Unix/include/x64"
+          "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}/${FFMPEG_NUGET_VERSION}/build/native/Unix/include/x64"
     )
 
     # Assumes FFMpeg NuGet package have been explicitly/externally restored to ${CMAKE_CURRENT_SOURCE_DIR}/Packages
-    set(FFMPEG_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}.${FFMPEG_NUGET_VERSION}/build/native/Unix/lib/debug/x64")
+    set(FFMPEG_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}/${FFMPEG_NUGET_VERSION}/build/native/Unix/lib/debug/x64")
     include(CMakePrintHelpers)
     cmake_print_variables(FFMPEG_LIB_PATH)
 
