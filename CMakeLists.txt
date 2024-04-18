@@ -42,9 +42,9 @@ if(WIN32)
         PROPERTY VS_PACKAGE_REFERENCES "${FFMPEG_NUGET_NAME}_${FFMPEG_NUGET_VERSION}"
     )
 else()
-    string(TOLOWER ${CMAKE_BUILD_TYPE} build_type)
+    string(TOLOWER ${CMAKE_BUILD_TYPE} build_type)   
 
-    SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")    
+    SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
     target_include_directories(${PROJECT_NAME} PUBLIC
           "${CMAKE_CURRENT_SOURCE_DIR}/Packages/${FFMPEG_NUGET_NAME}/${FFMPEG_NUGET_VERSION}/build/native/Unix/include/x64"
     )
@@ -69,6 +69,8 @@ else()
     
     set(FFMPEG_LIBS ${AVDEVICE_LIBRARY} ${AVFILTER_LIBRARY} ${AVFORMAT_LIBRARY} ${AVCODEC_LIBRARY} ${SWRESAMPLE_LIBRARY} ${SWSCALE_LIBRARY} ${AVUTIL_LIBRARY} ${VPX_LIBRARY} ${PKGCONF_LIBRARY} ${DAV1D_LIBRARY} ${Z_LIBRARY})
     cmake_print_variables(FFMPEG_LIBS)
+    
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fdebug-prefix-map=/build/build_linux_debug=/usr/src/griffeye.videoprocessor")
 
     set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-Bsymbolic")
 
