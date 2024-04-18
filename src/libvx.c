@@ -623,8 +623,8 @@ static bool vx_video_is_rotated(vx_video video)
 
 	return video.options.autorotate
 		&& vx_get_rotation_transform(video.fmt_ctx->streams[video.video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
-		&& transform == "transpose"
-		&& (transform_args == ROTATION_CLOCKWISE || transform_args == ROTATION_COUNTERCLOCKWISE);
+		&& strcmp(transform, "transpose") == 0
+		&& (strcmp(transform_args, ROTATION_CLOCKWISE) == 0 || strcmp(transform_args, ROTATION_COUNTERCLOCKWISE) == 0);
 }
 
 /// <summary>
