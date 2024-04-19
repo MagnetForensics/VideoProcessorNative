@@ -618,8 +618,8 @@ vx_error vx_get_frame_rate(const vx_video* video, float* out_fps)
 
 static bool vx_video_is_rotated(vx_video video)
 {
-	char* transform = NULL;
-	char* transform_args = NULL;
+	char* transform = "";
+	char* transform_args = "";
 
 	return video.options.autorotate
 		&& vx_get_rotation_transform(video.fmt_ctx->streams[video.video_stream], &transform, &transform_args) == VX_ERR_SUCCESS
