@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>    
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ffmpeg-lgpl" Version="6.1.0.2" targetFramework="native" />
+  </ItemGroup>
+
+</Project>
