@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 3.9)
 
-set(TARGET cli)
+set(TARGET libvxcli)
 
 include_directories("${CMAKE_SOURCE_DIR}/src")
 
