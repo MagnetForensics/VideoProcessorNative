@@ -23,7 +23,7 @@ Need to have dotnet CLI installed and some build utils
 `RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y build-essential cmake zip`
 
 ```
-dotnet restore Griffeye.VideoProcessor.Native.csproj --packages Packages
+dotnet restore Griffeye.VideoProcessor.Native.csproj --configfile NuGet.Config --packages Packages
 cmake -S . -B build_linux/
 cmake --build build_linux/ --config [Release|Debug]
 ```
