@@ -521,12 +521,21 @@ void vx_close(vx_video* video)
 		swr_free(&video->swr_ctx);
 
 	if (video->fmt_ctx)
-		avformat_free_context(video->fmt_ctx);
+		avformat_close_input(&video->fmt_ctx);
 
 	for (int i = 0; i < video->frame_queue_count; i++) {
 		av_frame_unref(video->frame_queue[i]);
 		av_frame_free(&video->frame_queue[i]);
 	}
+
+	if (video->hw_device_ctx)
+		av_buffer_unref(&video->hw_device_ctx);
+
+	if (video->audio_codec_ctx)
+        avcodec_free_context(&video->audio_codec_ctx);
+
+    if (video->video_codec_ctx)
+        avcodec_free_context(&video->video_codec_ctx);
 
 	free(video);
 }

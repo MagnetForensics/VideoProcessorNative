@@ -11,7 +11,7 @@
 int main(int argc, char* argv[]) {
     int result = 1;
     char* video_path = argc > 1 ? argv[1] : "";
-    vx_video* video = calloc(1, sizeof(vx_video));
+    vx_video* video = NULL;
     vx_video_info* video_info = calloc(1, sizeof(vx_video_info));
     vx_frame_info* frame_info = calloc(1, sizeof(vx_frame_info));
     vx_frame* frame = NULL;
