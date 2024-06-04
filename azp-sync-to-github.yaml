@@ -1,0 +1,29 @@
+trigger:
+  - master
+  
+pool:
+  name: WindowsVMSS
+
+variables:
+- group: MagnetForensics-Github
+
+steps:
+- checkout: self
+  clean: true
+  lfs: true
+  fetchDepth: 0
+  path: s
+
+- task: PowerShell@2
+  displayName: 'Push to GitHub'
+  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+  inputs:
+    targetType: 'inline'
+    script: |
+      git config user.email "Azure@Bot.com"
+      git config user.name "AzureDevOpsBot"
+      git remote remove github
+      git remote add github "https://$(PAT)@github.com/MagnetForensics/VideoProcessorNative.git"
+      git push --force github HEAD:master
+  env:
+    PAT: $(PAT)
