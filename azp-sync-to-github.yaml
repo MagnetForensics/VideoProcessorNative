@@ -16,7 +16,7 @@ steps:
 
 - task: PowerShell@2
   displayName: 'Push to GitHub'
-  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'master'))
+  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], 'main'))
   inputs:
     targetType: 'inline'
     script: |
@@ -24,6 +24,6 @@ steps:
       git config user.name "AzureDevOpsBot"
       git remote remove github
       git remote add github "https://$(PAT)@github.com/MagnetForensics/VideoProcessorNative.git"
-      git push --force github HEAD:master
+      git push --force github HEAD:main
   env:
     PAT: $(PAT)
