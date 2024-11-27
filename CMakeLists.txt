@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required (VERSION 3.9)
 
 set(FFMPEG_NUGET_NAME "ffmpeg-lgpl")
-set(FFMPEG_NUGET_VERSION "6.1.0.2")
+set(FFMPEG_NUGET_VERSION "7.1.0")
 
 # Enable Hot Reload for MSVC compilers if supported.
 if(POLICY CMP0141)

@@ -5,7 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ffmpeg-lgpl" Version="6.1.0.2" targetFramework="native" />
+    <PackageReference Include="ffmpeg-lgpl" Version="7.1.0" targetFramework="native" />
   </ItemGroup>
 
 </Project>
